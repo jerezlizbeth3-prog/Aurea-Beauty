@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Panel Administrativo - Aurae Beauty</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+  <!-- ====== TOASTS ====== -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <!-- ====== PANTALLA DE LOGIN ====== -->
+  <div class="login-wrap" id="loginScreen" style="display:none;">
+    <form class="login-card" id="loginForm" novalidate>
+      <img src="img/Logo.png" alt="Aurae Beauty" class="login-logo">
+      <h1>Panel Administrativo</h1>
+      <p class="login-sub">Acceso restringido - Aurae Beauty</p>
+
+      <div class="login-error" id="loginError" role="alert"></div>
+
+      <div class="form-group">
+        <label for="loginEmail">Correo electrónico</label>
+        <input type="email" id="loginEmail" required autocomplete="email" placeholder="admin@aurabeauty.co">
+      </div>
+
+      <div class="form-group">
+        <label for="loginPassword">Contraseña</label>
+        <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="••••••••">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="loginBtn">Ingresar</button>
+    </form>
+  </div>
+
+  <!-- ====== PANTALLA DEL PANEL ====== -->
+  <div id="panelScreen" style="display:none;">
+
+    <header class="admin-header">
+      <div class="admin-header-inner">
+        <div class="admin-brand">
+          <img src="img/Logo.png" alt="Aurae Beauty">
+          <h1>Panel Administrativo</h1>
+        </div>
+        <div class="admin-header-actions">
+          <span class="admin-user" id="adminUser"></span>
+          <button class="btn-ghost" id="reloadBtn" type="button">Actualizar</button>
+          <button class="btn-logout" id="logoutBtn" type="button">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="admin-tabs" role="tablist" aria-label="Secciones del panel">
+      <button class="admin-tab active" id="tabProductos" data-view="productos" role="tab" aria-selected="true" type="button">
+        Productos
+      </button>
+      <button class="admin-tab" id="tabPedidos" data-view="pedidos" role="tab" aria-selected="false" type="button">
+        Pedidos <span class="tab-count" id="tabPedidosCount">0</span>
+      </button>
+      <button class="admin-tab" id="tabCategorias" data-view="categorias" role="tab" aria-selected="false" type="button">
+        Categorías
+      </button>
+    </nav>
+
+    <!-- ========== VISTA PRODUCTOS ========== -->
+    <section id="viewProductos" role="tabpanel" aria-labelledby="tabProductos">
+    <div class="toolbar">
+      <div class="search-bar-wrapper">
+        <div class="search-bar">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="adminSearch" placeholder="Buscar por nombre o referencia...">
+          <button class="search-clear" id="adminSearchClear" type="button">✕</button>
+        </div>
+      </div>
+      <select class="filter-select" id="filterEstado">
+        <option value="todos">Todos los estados</option>
+        <option value="activo">Solo visibles</option>
+        <option value="inactivo">Solo ocultos</option>
+        <option value="stock0">Sin existencias</option>
+      </select>
+      <button class="btn-add-product" id="newProductBtn" type="button">+ Nuevo producto</button>
+    </div>
+
+      <div class="stats-row" id="statsRow">
+        <div class="stat-card">
+          <div class="stat-label">Productos</div>
+          <div class="stat-value" id="statTotal">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Visibles</div>
+          <div class="stat-value" id="statVisible">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Ocultos</div>
+          <div class="stat-value" id="statOculto">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sin stock</div>
+          <div class="stat-value" id="statSinStock">0</div>
+        </div>
+      </div>
+
+      <div class="state-box" id="loadingBox">
+        <div class="state-title">Cargando productos...</div>
+        <div><span class="spinner"></span> Consultando la base de datos</div>
+      </div>
+
+      <div class="state-box error" id="errorBox" style="display:none;">
+        <div class="state-title">No se pudieron cargar los productos</div>
+        <p id="errorMessage"></p>
+        <p style="margin-top:14px;">
+          <button class="btn btn-primary btn-sm" id="retryBtn" type="button">Reintentar</button>
+        </p>
+      </div>
+
+      <div class="state-box" id="emptyBox" style="display:none;">
+        <div class="state-title">No hay productos para mostrar</div>
+        <p id="emptyMessage">Ajusta la búsqueda o crea el primer producto.</p>
+      </div>
+
+      <div class="admin-table-wrapper" id="tableWrap" style="display:none;">
+        <table class="admin-table" aria-label="Listado de productos">
+          <thead>
+            <tr>
+              <th>Imagen</th>
+              <th>Referencia</th>
+              <th>Nombre</th>
+              <th>Categoría</th>
+              <th style="text-align:right;">Precio</th>
+              <th style="text-align:center;">Stock</th>
+              <th style="text-align:center;">Estado</th>
+              <th style="text-align:right;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="adminTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-mobile-cards" id="adminMobileCards"></div>
+    </section>
+
+    <!-- ========== VISTA PEDIDOS ========== -->
+    <section id="viewPedidos" role="tabpanel" aria-labelledby="tabPedidos" style="display:none;">
+
+      <div class="realtime-bar" id="realtimeBar">
+        <span class="rt-dot" id="rtDot"></span>
+        <span id="rtText">Conectando_updates en tiempo real...</span>
+        <button class="btn-ghost btn-reconnect" id="reconnectBtn" type="button" style="display:none;">Reintentar conexión</button>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-bar-wrapper">
+          <div class="search-bar">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="orderSearch" placeholder="Buscar por cliente, teléfono o referencia...">
+            <button class="search-clear" id="orderSearchClear" type="button">✕</button>
+          </div>
+        </div>
+        <div class="filter-chips" id="orderChips" role="group" aria-label="Filtros de estado del pedido"></div>
+      </div>
+
+      <div class="stats-row" id="orderStats">
+        <div class="stat-card">
+          <div class="stat-label">Pedidos</div>
+          <div class="stat-value" id="ordStatTotal">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Por cobrar</div>
+          <div class="stat-value" id="ordStatPendiente">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">En camino</div>
+          <div class="stat-value" id="ordStatDespacho">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Domicilio</div>
+          <div class="stat-value" id="ordStatDomicilio">0</div>
+        </div>
+      </div>
+
+      <div class="state-box" id="ordLoadingBox">
+        <div class="state-title">Cargando pedidos...</div>
+        <div><span class="spinner"></span> Consultando pedidos, pagos y envíos</div>
+      </div>
+
+      <div class="state-box error" id="ordErrorBox" style="display:none;">
+        <div class="state-title">No se pudieron cargar los pedidos</div>
+        <p id="ordErrorMessage"></p>
+        <p style="margin-top:14px;">
+          <button class="btn btn-primary btn-sm" id="ordRetryBtn" type="button">Reintentar</button>
+        </p>
+      </div>
+
+      <div class="state-box" id="ordEmptyBox" style="display:none;">
+        <div class="state-title" id="ordEmptyTitle">No hay pedidos para mostrar</div>
+        <p id="ordEmptyMessage">Ajusta los filtros o espera a que llegue un pedido nuevo.</p>
+      </div>
+
+      <div class="admin-table-wrapper" id="ordTableWrap" style="display:none;">
+        <table class="admin-table order-table" aria-label="Listado de pedidos">
+          <thead>
+            <tr>
+              <th>Ref.</th>
+              <th>Cliente</th>
+              <th>Fecha</th>
+              <th style="text-align:right;">Total</th>
+              <th>Pago</th>
+              <th>Estado pedido</th>
+              <th>Envío</th>
+              <th style="text-align:right;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="ordTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-mobile-cards" id="ordMobileCards"></div>
+    </section>
+
+    <!-- ========== VISTA CATEGORÍAS ========== -->
+    <section id="viewCategorias" role="tabpanel" aria-labelledby="tabCategorias" style="display:none;">
+
+      <div class="realtime-bar">
+        <span>Controla qué categorías ve el cliente en la tienda.</span>
+        <span style="margin-left:auto;">El cambio se aplica de inmediato en el sitio público.</span>
+      </div>
+
+      <div class="state-box" id="catLoadingBox">
+        <div class="state-title">Cargando categorías...</div>
+        <div><span class="spinner"></span> Consultando la tabla de categorías</div>
+      </div>
+
+      <div class="state-box error" id="catErrorBox" style="display:none;">
+        <div class="state-title">No se pudieron cargar las categorías</div>
+        <p id="catErrorMessage"></p>
+        <p style="margin-top:14px;">
+          <button class="btn btn-primary btn-sm" id="catRetryBtn" type="button">Reintentar</button>
+        </p>
+      </div>
+
+      <div class="state-box" id="catEmptyBox" style="display:none;">
+        <div class="state-title">No hay categorías registradas</div>
+        <p id="catEmptyMessage">Agrega filas a la tabla categorias_config para poder decidir su visibilidad.</p>
+      </div>
+
+      <div class="admin-table-wrapper" id="catTableWrap" style="display:none;">
+        <table class="admin-table" aria-label="Listado de categorías">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Visibilidad</th>
+              <th style="text-align:right;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="catTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-mobile-cards" id="catMobileCards"></div>
+    </section>
+    </main>
+  </div>
+
+  <!-- ====== MODAL PRODUCTO ====== -->
+  <div class="modal-overlay admin-modal" id="productModal" onclick="closeProductModal()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <button class="lightbox-close" onclick="closeProductModal()" type="button" aria-label="Cerrar">✕</button>
+      <h2 id="modalTitle">Nuevo producto</h2>
+      <p id="modalSubtitle">Completa los datos. El stock se guarda en la tabla de inventario.</p>
+
+      <div class="modal-error" id="modalError" role="alert"></div>
+
+      <form id="productForm" novalidate>
+        <div class="admin-modal-grid">
+
+          <div class="form-group">
+            <label for="fReferencia">Referencia *</label>
+            <input type="text" id="fReferencia" required placeholder="Ej: 5580-10">
+            <span class="error-msg">La referencia es obligatoria</span>
+          </div>
+
+          <div class="form-group">
+            <label for="fCategoria">Categoría *</label>
+            <input type="text" id="fCategoria" required list="categoryList" placeholder="Ej: combos">
+            <span class="error-msg">La categoría es obligatoria</span>
+            <datalist id="categoryList"></datalist>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="fNombre">Nombre *</label>
+            <input type="text" id="fNombre" required placeholder="Nombre del producto">
+            <span class="error-msg">El nombre es obligatorio</span>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="fDescripcion">Descripción</label>
+            <textarea id="fDescripcion" placeholder="Detalle, contenido del combo, modo de uso..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="fPrecio">Precio (COP) *</label>
+            <input type="number" id="fPrecio" required min="0" step="1" placeholder="62000">
+            <span class="error-msg">Ingresa un precio válido (0 o mayor)</span>
+          </div>
+
+          <div class="form-group">
+            <label for="fStock">Cantidad disponible *</label>
+            <input type="number" id="fStock" required min="0" step="1" placeholder="0">
+            <span class="error-msg">Ingresa una cantidad válida (0 o mayor)</span>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="fImagen">Imagen (ruta o URL)</label>
+            <input type="text" id="fImagen" placeholder="img/producto.jpg">
+            <img class="img-preview" id="imgPreview" src="" alt="" style="display:none;">
+          </div>
+
+          <div class="form-group full-width">
+            <label class="switch-row">
+              <input type="checkbox" id="fActivo" checked>
+              Visible en el catálogo
+            </label>
+          </div>
+
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeProductModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="productSubmitBtn">Guardar producto</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====== MODAL DETALLE PEDIDO ====== -->
+  <div class="modal-overlay admin-modal" id="orderModal">
+    <div class="modal-box order-modal-box">
+      <button class="lightbox-close" id="orderModalClose" type="button" aria-label="Cerrar">✕</button>
+      <h2 id="ordModalTitle">Detalle del pedido</h2>
+      <p id="ordModalSubtitle"></p>
+
+      <div class="modal-error" id="ordModalError" role="alert"></div>
+
+      <div id="ordModalBody">
+        <div class="ord-loading"><span class="spinner"></span> Cargando productos del pedido...</div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="ordModalCancel">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SCRIPTS ====== -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
