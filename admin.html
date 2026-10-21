@@ -63,8 +63,11 @@
       <button class="admin-tab" id="tabPedidos" data-view="pedidos" role="tab" aria-selected="false" type="button">
         Pedidos <span class="tab-count" id="tabPedidosCount">0</span>
       </button>
-      <button class="admin-tab" id="tabCategorias" data-view="categorias" role="tab" aria-selected="false" type="button">
-        Categorías
+      <button class="admin-tab" id="tabResenas" data-view="resenas" role="tab" aria-selected="false" type="button">
+        Reseñas <span class="tab-count" id="tabResenasCount">0</span>
+      </button>
+      <button class="admin-tab" id="tabProveedor" data-view="proveedor" role="tab" aria-selected="false" type="button">
+        Pedido a proveedor
       </button>
     </nav>
 
@@ -133,6 +136,7 @@
               <th>Nombre</th>
               <th>Categoría</th>
               <th style="text-align:right;">Precio</th>
+              <th style="text-align:right;">Pedidos clientes</th>
               <th style="text-align:center;">Stock</th>
               <th style="text-align:center;">Estado</th>
               <th style="text-align:right;">Acciones</th>
@@ -223,48 +227,103 @@
       <div class="admin-mobile-cards" id="ordMobileCards"></div>
     </section>
 
-    <!-- ========== VISTA CATEGORÍAS ========== -->
-    <section id="viewCategorias" role="tabpanel" aria-labelledby="tabCategorias" style="display:none;">
+    <!-- ========== VISTA RESEÑAS ========== -->
+    <section id="viewResenas" role="tabpanel" aria-labelledby="tabResenas" style="display:none;">
 
-      <div class="realtime-bar">
-        <span>Controla qué categorías ve el cliente en la tienda.</span>
-        <span style="margin-left:auto;">El cambio se aplica de inmediato en el sitio público.</span>
+      <div class="toolbar">
+        <div class="filter-chips" id="reviewChips" role="group" aria-label="Filtros de reseñas"></div>
       </div>
 
-      <div class="state-box" id="catLoadingBox">
-        <div class="state-title">Cargando categorías...</div>
-        <div><span class="spinner"></span> Consultando la tabla de categorías</div>
+      <div class="state-box" id="revLoadingBox">
+        <div class="state-title">Cargando reseñas...</div>
+        <div><span class="spinner"></span> Consultando la base de datos</div>
       </div>
 
-      <div class="state-box error" id="catErrorBox" style="display:none;">
-        <div class="state-title">No se pudieron cargar las categorías</div>
-        <p id="catErrorMessage"></p>
+      <div class="state-box error" id="revErrorBox" style="display:none;">
+        <div class="state-title">No se pudieron cargar las reseñas</div>
+        <p id="revErrorMessage"></p>
         <p style="margin-top:14px;">
-          <button class="btn btn-primary btn-sm" id="catRetryBtn" type="button">Reintentar</button>
+          <button class="btn btn-primary btn-sm" id="revRetryBtn" type="button">Reintentar</button>
         </p>
       </div>
 
-      <div class="state-box" id="catEmptyBox" style="display:none;">
-        <div class="state-title">No hay categorías registradas</div>
-        <p id="catEmptyMessage">Agrega filas a la tabla categorias_config para poder decidir su visibilidad.</p>
+      <div class="state-box" id="revEmptyBox" style="display:none;">
+        <div class="state-title" id="revEmptyTitle">Todavía no hay reseñas</div>
+        <p id="revEmptyMessage">Las reseñas que envíen tus clientas aparecerán aquí.</p>
       </div>
 
-      <div class="admin-table-wrapper" id="catTableWrap" style="display:none;">
-        <table class="admin-table" aria-label="Listado de categorías">
+      <div class="admin-table-wrapper" id="revTableWrap" style="display:none;">
+        <table class="admin-table" aria-label="Listado de reseñas">
           <thead>
             <tr>
-              <th>Categoría</th>
-              <th>Visibilidad</th>
+              <th>Nombre</th>
+              <th>Calificación</th>
+              <th>Comentario</th>
+              <th>Fecha</th>
+              <th>Estado</th>
               <th style="text-align:right;">Acciones</th>
             </tr>
           </thead>
-          <tbody id="catTableBody"></tbody>
+          <tbody id="revTableBody"></tbody>
         </table>
       </div>
 
-      <div class="admin-mobile-cards" id="catMobileCards"></div>
+      <div class="admin-mobile-cards" id="revMobileCards"></div>
     </section>
-    </main>
+
+    <!-- ========== VISTA PEDIDO A PROVEEDOR ========== -->
+    <section id="viewProveedor" role="tabpanel" aria-labelledby="tabProveedor" style="display:none;">
+      <div class="toolbar">
+        <div class="filter-group" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <select class="filter-select" id="provEstado">
+            <option value="pagado" selected>Solo pagado</option>
+            <option value="pendiente_pago">Pendiente de pago</option>
+            <option value="todos">Todos (excepto cancelado)</option>
+          </select>
+          <label style="font-size:0.85rem;">Desde <input type="date" id="provDesde"></label>
+          <label style="font-size:0.85rem;">Hasta <input type="date" id="provHasta"></label>
+          <button class="btn btn-primary btn-sm" id="provAplicar" type="button">Aplicar filtros</button>
+          <button class="btn btn-secondary btn-sm" id="provImprimir" type="button">Imprimir / Guardar PDF</button>
+          <button class="btn btn-secondary btn-sm" id="provCSV" type="button">Descargar CSV</button>
+        </div>
+      </div>
+
+      <div class="state-box" id="provLoadingBox">
+        <div class="state-title">Cargando pedido a proveedor...</div>
+        <div><span class="spinner"></span> Consolidando por producto y tono</div>
+      </div>
+
+      <div class="state-box error" id="provErrorBox" style="display:none;">
+        <div class="state-title">No se pudo cargar</div>
+        <p id="provErrorMessage"></p>
+      </div>
+
+      <div class="state-box" id="provEmptyBox" style="display:none;">
+        <div class="state-title">No hay productos para pedir con estos filtros</div>
+        <p id="provEmptyMessage"></p>
+      </div>
+
+      <div id="provNotaSinValor" style="display:none;background:#FEF3C7;padding:10px 14px;border-radius:8px;margin-bottom:12px;color:#92400E;"></div>
+
+      <div class="admin-table-wrapper" id="provTableWrap" style="display:none;">
+        <table class="admin-table" aria-label="Pedido a proveedor" id="provTable">
+          <thead>
+            <tr>
+              <th>Proveedor</th>
+              <th>Imagen</th>
+              <th>Referencia</th>
+              <th>Nombre</th>
+              <th>Tono</th>
+              <th style="text-align:center;">Cantidad total</th>
+              <th style="text-align:right;">Pedidos clientes</th>
+              <th style="text-align:right;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody id="provTableBody"></tbody>
+        </table>
+        <div style="text-align:right;margin-top:10px;font-weight:700;">Total general: <span id="provTotalGeneral">$ 0</span></div>
+      </div>
+    </section>
   </div>
 
   <!-- ====== MODAL PRODUCTO ====== -->
@@ -315,6 +374,12 @@
             <span class="error-msg">Ingresa una cantidad válida (0 o mayor)</span>
           </div>
 
+          <div class="form-group">
+            <label for="fPedidosClientes">Pedidos clientes</label>
+            <input type="number" id="fPedidosClientes" min="0" step="0.01" placeholder="0">
+            <span class="error-msg">Ingresa un valor válido</span>
+          </div>
+
           <div class="form-group full-width">
             <label for="fImagen">Imagen (ruta o URL)</label>
             <input type="text" id="fImagen" placeholder="img/producto.jpg">
@@ -354,6 +419,46 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" id="ordModalCancel">Cerrar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ====== MODAL EDITAR RESEÑA ====== -->
+  <div class="modal-overlay admin-modal" id="reviewModal">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <button class="lightbox-close" id="revModalClose" type="button" aria-label="Cerrar">✕</button>
+      <h2 id="revModalTitle">Editar reseña</h2>
+      <p>Cambia el nombre, la calificación o el comentario. El estado de publicación no cambia.</p>
+
+      <div class="modal-error" id="revModalError" role="alert"></div>
+
+      <form id="reviewFormAdmin" novalidate>
+        <div class="admin-modal-grid">
+          <div class="form-group full-width">
+            <label for="revfNombre">Nombre *</label>
+            <input type="text" id="revfNombre" maxlength="60" required>
+            <span class="error-msg">El nombre es obligatorio</span>
+          </div>
+          <div class="form-group full-width">
+            <label for="revfCalificacion">Calificación (1 a 5) *</label>
+            <select id="revfCalificacion" required>
+              <option value="5">5 estrellas</option>
+              <option value="4">4 estrellas</option>
+              <option value="3">3 estrellas</option>
+              <option value="2">2 estrellas</option>
+              <option value="1">1 estrella</option>
+            </select>
+          </div>
+          <div class="form-group full-width">
+            <label for="revfComentario">Comentario *</label>
+            <textarea id="revfComentario" maxlength="500" rows="4" required></textarea>
+            <span class="error-msg">El comentario es obligatorio</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="revModalCancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="revSubmitBtn">Guardar cambios</button>
+        </div>
+      </form>
     </div>
   </div>
 

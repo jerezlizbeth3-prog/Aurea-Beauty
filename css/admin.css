@@ -911,3 +911,33 @@ body.admin-body {
   .admin-tab { padding: 9px 11px; font-size: 0.85rem; }
   .btn-add-product { width: 100%; text-align: center; }
 }
+
+/* ========== RESEÑAS ========== */
+.badge.pendiente { background: #fff3cd; color: #856404; border-color: #ffe69c; }
+
+.rev-stars {
+  color: #FBBF24;
+  letter-spacing: 1px;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.cell-comment {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+}
+
+.m-card-comment {
+  font-size: 0.85rem;
+  color: #6B7280;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.ord-card-notas {
+  font-size: 0.8rem;
+  color: #6B7280;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}

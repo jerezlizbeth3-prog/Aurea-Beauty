@@ -6,6 +6,8 @@
   --color-secondary: #FFF0F6;
   --color-accent: #BE185D;
   --color-text: #1F2937;
+  --color-fab: #EC4899;
+  --color-fab-reviews: #8E4585;
   --color-border: #FCE4EC;
   --font-heading: 'Playfair Display', serif;
   --font-body: 'Lato', sans-serif;
@@ -771,9 +773,15 @@ ul { list-style: none; }
   padding: 60px 0;
 }
 
+#medios-pago .section-title {
+  text-align: center;
+}
+
 .payment-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
   gap: 20px;
 }
 
@@ -784,6 +792,13 @@ ul { list-style: none; }
   padding: 24px;
   text-align: center;
   transition: var(--transition);
+  flex: 1 1 260px;
+  max-width: 320px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 260px;
 }
 
 .payment-card:hover {
@@ -878,14 +893,14 @@ ul { list-style: none; }
 }
 
 .contact-info h3 {
-  font-size: 1.2rem;
+  font-size: 1.35rem;
   margin-bottom: 16px;
   color: var(--color-accent);
 }
 
 .contact-info p {
-  margin-bottom: 10px;
-  font-size: 0.95rem;
+  margin-bottom: 12px;
+  font-size: 1.05rem;
 }
 
 .contact-info .social-links {
@@ -895,12 +910,12 @@ ul { list-style: none; }
   flex-wrap: wrap;
 }
 
-.contact-info .schedule-note {
-  font-size: 0.85rem;
-  color: #888;
-  font-style: italic;
-  margin-top: 4px;
-}
+  .contact-info .schedule-note {
+    font-size: 0.98rem;
+    color: #888;
+    font-style: italic;
+    margin-top: 4px;
+  }
 
 /* ========== ORDER FORM ========== */
 #pedido {
@@ -1425,7 +1440,12 @@ ul { list-style: none; }
   }
 
   .payment-grid {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: center;
+  }
+  .payment-card {
+    max-width: 100%;
+    flex: 1 1 auto;
   }
 
   .steps {
@@ -1452,7 +1472,7 @@ ul { list-style: none; }
   padding: 14px 18px;
   font-size: 0.92rem;
   font-weight: 600;
-  color: var(--color-accent);
+  color: #111;
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -1661,3 +1681,295 @@ ul { list-style: none; }
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   CAMBIO 7 - FONDOS CONTINUOS
+   Un solo degradado vertical de rosa de marca (arriba) a rosa
+   muy suave (abajo) que cubre hero + Ofertas + Videos.
+   ========================================================= */
+.gradient-band {
+  background: linear-gradient(
+    180deg,
+    var(--color-primary) 0%,
+    #F472B6 32%,
+    #FBCFE8 66%,
+    var(--color-secondary) 100%
+  );
+}
+
+.gradient-band .hero,
+.gradient-band #ofertas,
+.gradient-band #videos-uso {
+  background: transparent;
+  border-bottom: none;
+}
+
+/* =========================================================
+   CAMBIO 8 - MENÚ SUPERIOR (píldora como .category-tab)
+   ========================================================= */
+.nav-links a {
+  border: 2px solid var(--color-border);
+  background: #ffffff;
+}
+
+.nav-links a:hover {
+  background-color: var(--color-secondary);
+  border-color: var(--color-primary);
+  color: var(--color-accent);
+}
+
+/* =========================================================
+   CAMBIO 3 - FORMULARIO DEL CLIENTE
+   ========================================================= */
+.delivery-address {
+  background: var(--color-secondary);
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.delivery-warning {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #FEF3C7;
+  border-left: 3px solid #F59E0B;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #92400E;
+}
+
+.consent-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.consent-row input {
+  width: auto;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.consent-link {
+  color: var(--color-accent);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* Campos trampa (honeypot): fuera de pantalla, invisibles para personas */
+.hp-field {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* =========================================================
+   CAMBIO 2 - BOTÓN SECUNDARIO WHATSAPP
+   ========================================================= */
+.btn-whatsapp-only {
+  background: #ffffff;
+  border: 2px solid var(--color-primary);
+  color: var(--color-accent);
+  padding: 14px 24px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-whatsapp-only:hover {
+  background: var(--color-secondary);
+}
+
+/* =========================================================
+   CAMBIO 6 - BURBUJA DE CONTACTO FLOTANTE
+   z-index por debajo de los modales (.modal-overlay = 9998).
+   ========================================================= */
+.contact-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.contact-fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(14px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+
+.contact-fab.open .contact-fab-menu {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.contact-fab-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.contact-fab-btn:hover {
+  transform: scale(1.08);
+}
+
+.contact-fab-btn::after {
+  content: attr(data-label);
+  position: absolute;
+  right: 58px;
+  white-space: nowrap;
+  background: #FFF0F6;
+  color: #111;
+  padding: 6px 12px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  font-size: 0.9rem;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2000;
+}
+
+.contact-fab-btn::before {
+  content: '';
+  position: absolute;
+  right: 52px;
+  width: 8px;
+  height: 8px;
+  background: #FFF0F6;
+  transform: rotate(45deg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.05);
+}
+
+.contact-fab-btn:hover::after,
+.contact-fab-btn:hover::before,
+.contact-fab-btn:focus-visible::after,
+.contact-fab-btn:focus-visible::before,
+.contact-fab-btn:active::after,
+.contact-fab-btn:active::before {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.fab-whatsapp { background: #25D366; }
+.fab-instagram { background: linear-gradient(45deg, #F58529, #DD2A7B, #8134AF, #515BD4); }
+.fab-reviews { background: var(--color-fab-reviews); }
+
+.contact-fab-toggle {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-fab);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(236, 72, 153, 0.4);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.contact-fab-toggle:hover {
+  background: #BE185D;
+  filter: brightness(0.95);
+  transform: scale(1.05);
+}
+
+.contact-fab .fab-icon-close { display: none; }
+.contact-fab.open .fab-icon-open { display: none; }
+.contact-fab.open .fab-icon-close { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .contact-fab-menu,
+  .contact-fab-btn,
+  .contact-fab-toggle { transition: none; }
+  .contact-fab-btn:hover,
+  .contact-fab-toggle:hover { transform: none; }
+}
+
+@media (max-width: 768px) {
+  #pedido { padding-bottom: 96px; }
+  .contact-fab { right: 14px; bottom: 14px; }
+  .contact-fab-btn { width: 44px; height: 44px; }
+  .contact-fab-toggle { width: 52px; height: 52px; }
+}
+
+/* =========================================================
+   CAMBIO 9 - TAMAÑO DE LETRA DEL SITIO PÚBLICO
+   Sube el texto pequeño 2-3 px, sin alcanzar h2/h3.
+   No toca el footer.
+   ========================================================= */
+.geo-banner { font-size: 0.9rem; }
+.search-bar input { font-size: 0.97rem; }
+.user-welcome { font-size: 0.95rem; }
+.user-register-note { font-size: 0.9rem; }
+.btn-edit-user { font-size: 0.9rem; }
+.btn-save-user { font-size: 0.9rem; }
+.social-tooltip { font-size: 0.8rem; }
+.reviews-subtitle { font-size: 0.93rem; }
+.review-card p { font-size: 0.93rem; }
+.review-author { font-size: 0.85rem; }
+.modal-box p { font-size: 0.93rem; }
+.category-tab { font-size: 0.9rem; }
+.catalog-grid .card-body .card-ref { font-size: 0.85rem; }
+.catalog-grid .card-body label { font-size: 0.85rem; }
+.catalog-grid .card-body select,
+.catalog-grid .card-body input[type="number"] { font-size: 0.9rem; }
+.product-description { font-size: 0.9rem; }
+.offers-carousel .card-body .price .old { font-size: 0.9rem; }
+.step-card p { font-size: 0.93rem; }
+.payment-card p { font-size: 0.9rem; }
+.payment-info { font-size: 0.9rem; }
+.guarantee-card .warning-note { font-size: 0.95rem; }
+.contact-info .schedule-note { font-size: 0.9rem; }
+.form-group label { font-size: 0.93rem; }
+.form-group input,
+.form-group select,
+.form-group textarea { font-size: 0.95rem; }
+.form-group .error-msg { font-size: 0.83rem; }
+.order-table { font-size: 0.92rem; }
+.order-table thead th { font-size: 0.86rem; }
+.videos-banner { font-size: 0.97rem; }
+.video-card-body p { font-size: 0.9rem; }
+.videos-empty small { font-size: 0.9rem; }
+.reviews-empty { font-size: 0.95rem; }
+.payment-warning { font-size: 0.83rem; }
+.pickup-address small { font-size: 0.85rem; }
+.btn-sm { font-size: 0.87rem; }
+.app-toast { font-size: 0.93rem; }
+.order-mobile-card .row { font-size: 0.9rem; }

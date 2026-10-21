@@ -30,6 +30,9 @@
     </div>
   </nav>
 
+  <!-- ====== BANDA CONTINUA: HERO + OFERTAS + VIDEOS ====== -->
+  <div class="gradient-band">
+
   <!-- ====== HERO / INICIO ====== -->
   <section id="inicio" class="hero">
     <div class="container">
@@ -52,7 +55,7 @@
     <div class="container">
       <h2 id="videos-title" class="section-title">🎬 Videos de uso</h2>
       <div class="videos-banner">
-        Aquí puedes encontrar cómo utilizar algunos de nuestros productos
+        Aquí puedes encontrar cómo se utilizan algunos de nuestros productos
       </div>
       <div class="video-grid" id="videoGrid"></div>
       <div class="videos-empty" id="videosEmpty" style="display:none;">
@@ -62,6 +65,9 @@
       </div>
     </div>
   </section>
+
+  </div>
+  <!-- ====== FIN BANDA CONTINUA ====== -->
 
   <!-- ====== CATÁLOGO ====== -->
   <section id="catalogo" aria-labelledby="catalogo-title">
@@ -144,14 +150,6 @@
       <h2 id="pago-title" class="section-title">💳 Medios de pago</h2>
       <div class="payment-grid">
         <div class="payment-card">
-          <div class="p-icon">📱</div>
-          <h3>Nequi</h3>
-          <p>Transferencia desde la app al número indicado al confirmar el pedido.</p>
-          <div class="payment-info">
-            📱 Al confirmar tu pedido te enviaremos el número Nequi al cual debes realizar la transferencia. Una vez realizado el pago, envíanos el comprobante por WhatsApp.
-          </div>
-        </div>
-        <div class="payment-card">
           <div class="p-icon">🏦</div>
           <h3>Transferencia Bancolombia</h3>
           <p>Transferencia o consignación desde tu cuenta Bancolombia.</p>
@@ -217,9 +215,9 @@
               <span class="error-msg">Debe contener entre 7 y 10 dígitos numéricos</span>
             </div>
             <div class="form-group">
-              <label for="clientAddress">Dirección de entrega <span class="req" id="addressReq">*</span></label>
-              <input type="text" id="clientAddress" required placeholder="Ej: Cra 30 #45-20">
-              <span class="error-msg">La dirección es obligatoria</span>
+              <label for="clientId">Número de identificación *</label>
+              <input type="text" id="clientId" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="Ej: 1098765432">
+              <span class="error-msg">Debe contener entre 6 y 12 dígitos numéricos</span>
             </div>
             <div class="form-group">
               <label for="clientCity">Ciudad *</label>
@@ -234,7 +232,7 @@
             </div>
             <div class="form-group full-width">
               <label for="clientNotes">Observaciones</label>
-              <textarea id="clientNotes" placeholder="Indicaciones especiales para la entrega..."></textarea>
+              <textarea id="clientNotes" maxlength="300" placeholder="Indicaciones especiales para la entrega..."></textarea>
             </div>
             <div class="form-group">
               <label for="clientDeliveryMethod">Método de entrega *</label>
@@ -243,23 +241,36 @@
                 <option value="recoge">Recoger en tienda</option>
               </select>
             </div>
-            <div class="form-group">
-              <label for="clientPaymentMethod">Método de pago</label>
-              <select id="clientPaymentMethod" required onchange="handlePaymentMethodChange(this.value)">
-                 <option value="">Selecciona un método</option>
-                 <option value="Transferencia Nequi">Transferencia Nequi</option>
-                 <option value="Transferencia Bancolombia">Transferencia Bancolombia</option>
-                 <option value="Efectivo contra entrega">Efectivo contra entrega</option>
-             </select>
-             <div class="payment-warning" id="paymentWarning">
-               Al elegir una transferencia te enviaremos los datos para consignar. Envía el comprobante por WhatsApp para que podamos procesar tu pedido.
-             </div>
-             </div>
+              <div class="form-group">
+                <label for="clientPaymentMethod">Método de pago</label>
+                <select id="clientPaymentMethod" required onchange="handlePaymentMethodChange(this.value)">
+                  <option value="">Selecciona un método</option>
+                  <option value="Transferencia Bancolombia">Transferencia Bancolombia</option>
+                  <option value="Efectivo contra entrega">Efectivo contra entrega</option>
+               </select>
+               <div class="payment-warning" id="paymentWarning">
+                 Al elegir una transferencia te enviaremos los datos para consignar. Envía el comprobante por WhatsApp para que podamos procesar tu pedido.
+               </div>
+               </div>
+            <div class="form-group full-width delivery-address" id="deliveryAddress">
+              <label for="clientAddress">Dirección de entrega <span class="req" id="addressReq">*</span></label>
+              <input type="text" id="clientAddress" placeholder="Ej: Cra 30 #45-20">
+              <span class="error-msg">La dirección es obligatoria (entre 5 y 200 caracteres)</span>
+              <div class="delivery-warning">Los domicilios se realizan solo los fines de semana (sábados y domingos)</div>
+            </div>
             <div class="form-group full-width pickup-address" id="pickupAddress" style="display:none;">
               <label>📍 Recoge tu pedido en</label>
-              <p class="pickup-address-text">[DIRECCIÓN DE LA TIENDA AQUÍ]</p>
+              <p class="pickup-address-text">[Calle 122 # 64 Palmeras de Villaluz (floridablanca) ]</p>
               <small>Será te notificada por WhatsApp cuando tu pedido esté listo.</small>
             </div>
+              <div class="form-group full-width consent-group">
+                <label class="consent-row" for="clientConsent">
+                  <input type="checkbox" id="clientConsent">
+                  <span>Autorizo el tratamiento de mis datos personales para gestionar mi pedido.</span>
+                </label>
+                <span class="error-msg">Debes autorizar el tratamiento de tus datos para continuar</span>
+              </div>
+            <input type="text" id="orderWebsite" name="website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
           </form>
         </div>
 
@@ -289,7 +300,10 @@
           <div class="form-actions">
             <button type="button" class="btn-add-row" onclick="addRow()">+ Agregar producto</button>
             <button type="button" class="btn-submit" id="submitOrder" disabled>
-              💬 Enviar pedido por WhatsApp
+              Finalizar pedido
+            </button>
+            <button type="button" class="btn-whatsapp-only" id="whatsappOnlyBtn" style="display:none;">
+              Enviar solo por WhatsApp
             </button>
           </div>
         </div>
@@ -309,20 +323,7 @@
           <p>📱 3170518355</p>
           <p>🕐 Lun - Sáb: 8:00 AM - 6:00 PM</p>
           <p class="schedule-note">Puedes escribirnos en cualquier momento; tu mensaje será atendido dentro del horario establecido.</p>
-          <div class="social-links">
-            <div class="social-item-wrap">
-              <a class="social-item" href="https://wa.me/573170518355" target="_blank" rel="noopener">💬</a>
-              <span class="social-tooltip">WhatsApp — Escríbenos para consultas y pedidos</span>
-            </div>
-            <div class="social-item-wrap">
-              <a class="social-item" href="https://instagram.com/TUPERFIL" target="_blank" rel="noopener">📸</a>
-              <span class="social-tooltip">Instagram — Fotos reales de productos y novedades</span>
-            </div>
-            <div class="social-item-wrap">
-              <div class="social-item" onclick="openReviewsModal()">🤌</div>
-              <span class="social-tooltip">Reseñas — Opiniones y recomendaciones de clientas</span>
-            </div>
-          </div>
+        
         </div>
         <div class="contact-info">
           <h3>Cobertura de envíos</h3>
@@ -387,6 +388,7 @@
           <label for="reviewComment">Tu reseña *</label>
           <textarea id="reviewComment" required maxlength="500" rows="4" placeholder="Cuéntanos qué te pareció el producto..."></textarea>
         </div>
+        <input type="text" id="reviewWebsite" name="website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
         <div class="form-actions">
           <button type="submit" class="btn-submit" id="reviewSubmitBtn">Publicar reseña</button>
         </div>
@@ -398,6 +400,35 @@
   <div id="lightbox" class="lightbox-overlay" onclick="closeLightbox()">
     <button class="lightbox-close" onclick="closeLightbox()">✕</button>
     <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
+  </div>
+
+  <!-- ====== CONTACTO FLOTANTE ====== -->
+  <div class="contact-fab" id="contactFab">
+    <div class="contact-fab-menu" id="contactFabMenu">
+      <a class="contact-fab-btn fab-whatsapp" href="https://wa.me/573170518355" target="_blank" rel="noopener" aria-label="WhatsApp" title="WhatsApp" data-label="WhatsApp">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c0-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+      </a>
+      <a class="contact-fab-btn fab-instagram" href="https://instagram.com/TUPERFIL" target="_blank" rel="noopener" aria-label="Instagram" title="Instagram" data-label="Instagram">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
+        </svg>
+      </a>
+      <button class="contact-fab-btn fab-reviews" type="button" onclick="openReviewsModal()" aria-label="Reseñas" title="Reseñas" data-label="Reseñas">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+          <path d="M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.58L12 17.57l-5.9 3.11 1.13-6.58L2.45 9.44l6.6-.96L12 2.5z"/>
+        </svg>
+      </button>
+    </div>
+    <button class="contact-fab-toggle" id="contactFabToggle" type="button" aria-label="Abrir medios de contacto" aria-expanded="false" aria-controls="contactFabMenu">
+      <svg class="fab-icon-open" viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">
+        <path d="M12 3C6.99 3 3 6.58 3 11c0 2.28 1.05 4.34 2.75 5.78L5 21l3.62-1.55c1.05.34 2.19.55 3.38.55 5.01 0 9-3.58 9-8s-3.99-8-9-8z"/>
+      </svg>
+      <svg class="fab-icon-close" viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">
+        <path d="M18.3 5.71L12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.3 19.71 2.89 18.3 9.18 12 2.89 5.71 4.3 4.29l6.29 6.3 6.3-6.3z"/>
+      </svg>
+    </button>
   </div>
 
   <!-- ====== SCRIPTS ====== -->
