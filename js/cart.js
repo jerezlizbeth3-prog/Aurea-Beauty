@@ -6,6 +6,64 @@ function initCart() {
   updateFormValidity();
 }
 
+function getProductStock(product) {
+  if (!product) return null;
+  const raw = product.stock;
+  if (raw === undefined || raw === null || raw === '' || typeof raw === 'boolean') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function validateCartSelection(product, tone, qty) {
+  if (!product) return 'Selecciona un producto';
+
+  const tones = Array.isArray(product.tones) ? product.tones : [];
+  if (tones.length > 0 && (!tone || String(tone).trim() === '')) return 'Elige un tono';
+
+  const stock = getProductStock(product);
+  const amount = Math.max(1, parseInt(qty, 10) || 1);
+  if (stock !== null && amount > stock) {
+    if (stock <= 0) return 'Producto agotado';
+    return 'Solo hay ' + stock + (stock === 1 ? ' disponible' : ' disponibles');
+  }
+
+  return '';
+}
+
+function addItemToCart(product, tone, qty, existingIndex) {
+  if (!product) return;
+
+  const tones = Array.isArray(product.tones) ? product.tones : [];
+  const selectedTone = (tone !== undefined && tone !== null && String(tone).trim() !== '')
+    ? String(tone)
+    : (tones.length > 0 ? String(tones[0]) : '');
+  const amount = Math.max(1, parseInt(qty, 10) || 1);
+
+  let index = existingIndex;
+  if (typeof index !== 'number' || index < 0 || index >= orderItems.length) {
+    addRow();
+    index = orderItems.length - 1;
+  }
+
+  const item = orderItems[index];
+  item.ref = product.reference;
+  item.name = product.name;
+  item.price = getProductPrice(product);
+  item.qty = amount;
+  item.tone = selectedTone;
+  calculateRow(index);
+
+  renderTable();
+  renderMobileCards();
+  updateFormValidity();
+  if (typeof updateCartBadges === 'function') updateCartBadges();
+
+  const view = document.getElementById('carroView');
+  if (view && view.classList.contains('active') && typeof renderCartView === 'function') {
+    renderCartView();
+  }
+}
+
 function addRow() {
   rowCounter++;
   const index = orderItems.length;
@@ -29,6 +87,7 @@ function removeRow(index) {
   renderTable();
   renderMobileCards();
   updateFormValidity();
+  if (typeof updateCartBadges === 'function') updateCartBadges();
 }
 
 function handleRefChange(index, ref) {
@@ -36,7 +95,7 @@ function handleRefChange(index, ref) {
   if (product) {
     orderItems[index].ref = ref;
     orderItems[index].name = product.name;
-    orderItems[index].price = product.price;
+    orderItems[index].price = getProductPrice(product);
     orderItems[index].tone = product.tones.length > 0 ? product.tones[0] : '';
   } else {
     orderItems[index].ref = '';
@@ -49,6 +108,7 @@ function handleRefChange(index, ref) {
   renderTable();
   renderMobileCards();
   updateFormValidity();
+  if (typeof updateCartBadges === 'function') updateCartBadges();
 }
 
 function handleToneChange(index, tone) {
@@ -64,15 +124,25 @@ function handleQtyChange(index, qty) {
   renderTable();
   renderMobileCards();
   updateFormValidity();
+  if (typeof updateCartBadges === 'function') updateCartBadges();
+}
+
+function getItemUnitPrice(item) {
+  const product = products.find(p => p.reference === item.ref);
+  if (product && typeof getProductPrice === 'function') return getProductPrice(product);
+  return Number(item.price) || 0;
 }
 
 function calculateRow(index) {
   const item = orderItems[index];
+  item.price = getItemUnitPrice(item);
   item.subtotal = item.qty * item.price;
 }
 
 function getTotal() {
-  return orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+  return orderItems.reduce((sum, item) => {
+    return sum + getItemUnitPrice(item) * (Number(item.qty) || 0);
+  }, 0);
 }
 
 function isFormValid() {
@@ -136,6 +206,9 @@ function renderTable() {
       ).join('');
     })();
 
+    const unitPrice = getItemUnitPrice(item);
+    const subtotal = unitPrice * (Number(item.qty) || 0);
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${i + 1}</td>
@@ -156,8 +229,8 @@ function renderTable() {
           onchange="handleQtyChange(${i}, this.value)"
           aria-label="Cantidad">
       </td>
-      <td class="subtotal-cell">$${item.price.toLocaleString('es-CO')}</td>
-      <td class="subtotal-cell">$${item.subtotal.toLocaleString('es-CO')}</td>
+      <td class="subtotal-cell">$${unitPrice.toLocaleString('es-CO')}</td>
+      <td class="subtotal-cell">$${subtotal.toLocaleString('es-CO')}</td>
       <td>
         <button class="delete-btn" onclick="removeRow(${i})" aria-label="Eliminar fila">&times;</button>
       </td>
@@ -182,6 +255,8 @@ function renderMobileCards() {
   container.innerHTML = '';
   orderItems.forEach((item, i) => {
     const prod = products.find(p => p.reference === item.ref);
+    const unitPrice = getItemUnitPrice(item);
+    const subtotal = unitPrice * (Number(item.qty) || 0);
     const card = document.createElement('div');
     card.className = 'order-mobile-card';
 
@@ -212,11 +287,11 @@ function renderMobileCards() {
       </div>
       <div class="row">
         <label>Precio</label>
-        <span>$${item.price.toLocaleString('es-CO')}</span>
+        <span>$${unitPrice.toLocaleString('es-CO')}</span>
       </div>
       <div class="row">
         <label>Subtotal</label>
-        <span>$${item.subtotal.toLocaleString('es-CO')}</span>
+        <span>$${subtotal.toLocaleString('es-CO')}</span>
       </div>
     `;
     container.appendChild(card);

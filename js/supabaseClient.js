@@ -47,8 +47,9 @@ async function cargarProductosDesdeSupabase() {
     price: Number(p.precio),
     description: p.descripcion,
     image: p.imagen_url,
-    tones: [],
-    offer: false,
-    offerPrice: null
+    tones: Array.isArray(p.tonos) ? p.tonos.map(t => String(t)) : [],
+    offer: p.en_oferta === true,
+    offerPrice: (p.precio_oferta !== undefined && p.precio_oferta !== null) ? Number(p.precio_oferta) : null,
+    stock: (p.stock_disponible !== undefined && p.stock_disponible !== null) ? Number(p.stock_disponible) : null
   }));
 }
