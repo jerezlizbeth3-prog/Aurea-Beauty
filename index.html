@@ -25,10 +25,32 @@
         <li><a href="#medios-pago">Medios de pago</a></li>
         <li><a href="#contacto">Contacto</a></li>
       </ul>
-      <a href="#pedido" class="btn-pedido">Hacer pedido</a>
+      <div class="nav-actions">
+        <button class="btn-ver-carro nav-btn" id="btnVerCarro" type="button" aria-label="Ver carro">
+          <span class="nav-btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="20" r="1.5"></circle>
+              <circle cx="18" cy="20" r="1.5"></circle>
+              <path d="M2 3h2l2.4 11.2a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 2-1.6L21 7H6"></path>
+            </svg>
+          </span>
+          <span class="nav-btn-label">Ver carro</span>
+          <span class="carro-badge" id="carroBadge" style="display:none;">0</span>
+        </button>
+        <a href="#pedido" class="btn-pedido nav-btn">
+          <span class="nav-btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 8h12l-1 12H7L6 8z"></path>
+              <path d="M9 8V6a3 3 0 0 1 6 0v2"></path>
+            </svg>
+          </span>
+          <span class="nav-btn-label">Hacer pedido</span>
+        </a>
+      </div>
       <button class="hamburger" id="hamburger">☰</button>
     </div>
   </nav>
+
 
   <!-- ====== BANDA CONTINUA: HERO + OFERTAS + VIDEOS ====== -->
   <div class="gradient-band">
@@ -299,6 +321,10 @@
 
           <div class="form-actions">
             <button type="button" class="btn-add-row" onclick="addRow()">+ Agregar producto</button>
+            <button type="button" class="btn-add-row btn-add-cart-form" id="btnVerCarroForm" aria-label="Agregar al carro">
+              <span aria-hidden="true">🛒</span>
+              <span id="btnVerCarroFormTxt">Agregar al carro</span>
+            </button>
             <button type="button" class="btn-submit" id="submitOrder" disabled>
               Finalizar pedido
             </button>
@@ -309,6 +335,97 @@
         </div>
 
       </div>
+    </div>
+  </section>
+
+  <!-- ====== VISTA DEL CARRITO ====== -->
+  <section id="carroView" class="carro-view" aria-labelledby="carroTitle" aria-hidden="true">
+    <div class="carro-shell">
+      <header class="carro-header">
+        <button class="carro-back" id="carroBack" type="button" aria-label="Volver al catálogo">←</button>
+
+        <label class="carro-all" for="carroCheckAll">
+          <input type="checkbox" id="carroCheckAll" aria-label="Seleccionar todos los productos">
+          <span class="carro-all-txt">Todos</span>
+        </label>
+
+        <h2 id="carroTitle" class="carro-title">Carrito <span id="carroCount">(0)</span></h2>
+
+        <button class="carro-del-selected" id="carroDelSelected" type="button" aria-label="Eliminar productos seleccionados">
+          <span class="carro-del-ico" aria-hidden="true">🗑</span>
+          <span class="carro-del-txt">Eliminar</span>
+        </button>
+      </header>
+
+      <div class="carro-layout">
+        <div class="carro-main">
+          <div id="carroContent"></div>
+
+          <button class="carro-add-more" id="carroAddMore" type="button">
+            <span aria-hidden="true">+</span> Agregar producto
+          </button>
+        </div>
+
+        <aside class="carro-summary" id="carroSummaryCard" aria-label="Resumen de la compra">
+          <h3 class="carro-summary-title">Resumen de la compra</h3>
+
+          <div class="carro-sum-row carro-sum-subrow">
+            <span>Subtotal</span>
+            <span class="carro-sum-sub" id="carroSumSub">$0</span>
+          </div>
+
+          <div class="carro-sum-row carro-sum-oldrow" id="carroSumOldRow">
+            <span>Total sin descuento</span>
+            <span class="carro-sum-old" id="carroSumOld">$0</span>
+          </div>
+
+          <div class="carro-sum-row carro-sum-saverow" id="carroSaveRow">
+            <span>Ahorras</span>
+            <span class="carro-sum-save" id="carroSave">$0</span>
+          </div>
+
+          <div class="carro-sum-total">
+            <span>Total del pedido</span>
+            <strong id="carroSumPay">$0</strong>
+          </div>
+
+          <div class="carro-sum-field">
+            <label for="carroDeliveryMethod">Método de entrega</label>
+            <select id="carroDeliveryMethod" aria-label="Método de entrega">
+              <option value="domicilio">Domicilio</option>
+              <option value="recoge">Recoge en tienda</option>
+            </select>
+            <div class="delivery-warning" id="carroDeliveryWarning">Los domicilios se realizan solo los fines de semana (sábados y domingos)</div>
+          </div>
+
+          <div class="carro-sum-field">
+            <label for="carroPaymentMethod">Método de pago</label>
+            <select id="carroPaymentMethod" aria-label="Método de pago">
+              <option value="">Selecciona un método</option>
+              <option value="Transferencia Bancolombia">Transferencia Bancolombia</option>
+              <option value="Efectivo contra entrega">Efectivo contra entrega</option>
+            </select>
+            <div class="payment-warning" id="carroPaymentWarning">
+              Al elegir una transferencia te enviaremos los datos para consignar. Envía el comprobante por WhatsApp para que podamos procesar tu pedido.
+            </div>
+          </div>
+
+          <button class="carro-checkout" id="carroCheckout" type="button" disabled>Finalizar compra</button>
+          <p class="carro-sum-note" id="carroSumNote">Agrega productos para continuar</p>
+        </aside>
+      </div>
+    </div>
+
+    <div class="carro-sticky" id="carroSticky">
+      <div class="carro-sticky-info">
+        <span class="carro-sticky-old" id="carroStickyOld"></span>
+        <span class="carro-sticky-save" id="carroStickySave"></span>
+        <div class="carro-sticky-total">
+          <span>Total</span>
+          <strong id="carroStickyTotal">$0</strong>
+        </div>
+      </div>
+      <button class="carro-checkout carro-checkout-sticky" id="carroCheckoutSticky" type="button" disabled>Finalizar compra</button>
     </div>
   </section>
 
