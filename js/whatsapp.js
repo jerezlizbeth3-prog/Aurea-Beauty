@@ -40,6 +40,14 @@ function validateOrder(client, items) {
   if (!items.length) {
     return 'Debes agregar al menos un producto al pedido.';
   }
+  for (const item of items) {
+    const prod = typeof products !== 'undefined'
+      ? products.find(p => p.reference === item.ref)
+      : null;
+    if (prod && Array.isArray(prod.tones) && prod.tones.length > 0 && !String(item.tone || '').trim()) {
+      return 'Elige un tono antes de finalizar el pedido.';
+    }
+  }
   return '';
 }
 
@@ -175,6 +183,9 @@ async function submitOrder() {
     else window.open(url, '_blank');
 
     resetOrderForm();
+    if (typeof limpiarCarroGuardado === 'function') {
+      limpiarCarroGuardado();
+    }
     if (typeof limpiarBorradorFormularioSession === 'function') {
       limpiarBorradorFormularioSession();
     }

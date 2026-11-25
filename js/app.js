@@ -108,7 +108,9 @@ function initNavbar() {
   document.getElementById('btnSeguirComprando')?.addEventListener('click', goToCartCatalog);
   document.getElementById('carroBack')?.addEventListener('click', goToCartCatalog);
   document.getElementById('carroAddMore')?.addEventListener('click', goToCartCatalog);
+  document.getElementById('carroVaciar')?.addEventListener('click', vaciarCarro);
   document.getElementById('carroDelSelected')?.addEventListener('click', deleteSelectedCartItems);
+
   document.getElementById('carroCheckAll')?.addEventListener('change', (e) => setAllCartChecks(e.target.checked));
   window.addEventListener('hashchange', () => {
     if (location.hash === '#carro') showCartView(); else hideCartView();
@@ -1625,7 +1627,9 @@ function syncCartAfterChange() {
   if (typeof renderTable === 'function') { renderTable(); renderMobileCards(); }
   if (typeof updateFormValidity === 'function') updateFormValidity();
   renderCartView();
+  if (typeof guardarCarroEnStorage === 'function') guardarCarroEnStorage();
 }
+
 
 function deleteSelectedCartItems() {
   const checks = Array.from(document.querySelectorAll('#carroContent .carro-check:checked'));
@@ -1672,7 +1676,14 @@ function renderCartView() {
   }
   if (delSel) delSel.disabled = !hasItems;
 
+  const vaciar = document.getElementById('carroVaciar');
+  if (vaciar) {
+    vaciar.hidden = !hasItems;
+    vaciar.style.display = hasItems ? '' : 'none';
+  }
+
   let grandTotal = 0;
+
   let oldTotal = 0;
   let totalQty = 0;
 
