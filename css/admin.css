@@ -91,9 +91,7 @@ body.admin-body {
   background: #fff;
   box-shadow: 0 1px 0 var(--color-border), 0 4px 16px rgba(190, 24, 93, 0.06);
   border-bottom: 3px solid var(--color-primary);
-  position: sticky;
-  top: 0;
-  z-index: 100;
+  position: static;
 }
 
 .admin-header-inner {
@@ -422,6 +420,19 @@ body.admin-body {
 .btn-row-action:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-row-action:disabled:hover { background: #fff; border-color: var(--color-border); }
 
+.product-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  color: #6B7280;
+  font-size: 0.84rem;
+}
+
+.product-pagination .btn-row-action { margin-left: 0; }
+
 /* ========== TARJETAS MÓVIL ========== */
 .admin-mobile-cards { display: none; }
 
@@ -514,16 +525,23 @@ body.admin-body {
 
 .switch-row input { width: auto; margin: 0; }
 
-.img-preview {
-  width: 100%;
-  max-width: 120px;
-  height: 120px;
-  object-fit: contain;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-sm);
-  background: #fff;
-  margin-top: 6px;
-  padding: 4px;
+.admin-modal-grid textarea {
+  resize: vertical;
+  min-height: 92px;
+}
+
+.admin-modal-grid input[readonly] {
+  background: #F9FAFB;
+  color: #6B7280;
+  cursor: not-allowed;
+}
+
+.field-help {
+  display: block;
+  margin-top: 5px;
+  color: #6B7280;
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
 .modal-error {
@@ -619,11 +637,16 @@ body.admin-body {
 
 /* ========== PESTAÑAS ========== */
 .admin-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   display: flex;
   gap: 6px;
   border-bottom: 2px solid var(--color-border);
   margin-bottom: 20px;
   overflow-x: auto;
+  background: #fdf2f8;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .admin-tab {
@@ -961,6 +984,13 @@ body.admin-body {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 6px;
+}
+
+.import-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .import-title {

@@ -12,6 +12,11 @@ const state = {
   filter: "todos",
   editingId: null,
   loading: false,
+  productPage: 1,
+  productPageSize: 50,
+  productsCount: 0,
+  productCounts: { total: 0, visibles: 0, ocultos: 0, sinStock: 0 },
+  productsRequestId: 0,
   view: "productos",
   orders: [],
   orderSearch: "",
@@ -34,8 +39,8 @@ const state = {
 };
 
 const SELECT_PRODUCTOS =
-  "id_producto, referencia, nombre, descripcion, precio, imagen_url, categoria, activo, creado_en, pedidos_clientes," +
-  " inventario ( cantidad_disponible, cantidad_reservada )";
+  "id_producto, referencia, nombre, descripcion, precio, imagen_url, categoria, activo, tonos," +
+  " en_oferta, precio_oferta, inventario ( cantidad_disponible, cantidad_reservada )";
 
 const SELECT_PEDIDOS =
   "id_pedido, referencia, fecha, estado, total, origen_whatsapp, tipo_entrega, notas," +
@@ -86,6 +91,28 @@ function escapeHtml(valor) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function createEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined && text !== null) el.textContent = String(text);
+  return el;
+}
+
+function actionButton(action, id, label, extraClass) {
+  const btn = createEl("button", "btn-row-action" + (extraClass ? " " + extraClass : ""), label);
+  btn.type = "button";
+  btn.setAttribute("data-action", action);
+  btn.setAttribute("data-id", String(id));
+  return btn;
+}
+
+function applyStyles(el, styles) {
+  Object.keys(styles).forEach((key) => {
+    el.style[key] = styles[key];
+  });
+  return el;
 }
 
 function getInventario(producto) {
@@ -152,11 +179,9 @@ function translateError(error, contexto) {
 function showToast(mensaje, tipo, titulo) {
   const cont = document.getElementById("toastContainer");
   if (!cont) return;
-  const toast = document.createElement("div");
-  toast.className = "toast " + (tipo || "info");
-  toast.innerHTML =
-    (titulo ? "<strong>" + escapeHtml(titulo) + "</strong>" : "") +
-    "<span>" + escapeHtml(mensaje) + "</span>";
+  const toast = createEl("div", "toast " + (tipo || "info"));
+  if (titulo) toast.appendChild(createEl("strong", "", titulo));
+  toast.appendChild(createEl("span", "", mensaje));
   cont.appendChild(toast);
   setTimeout(() => {
     toast.style.transition = "opacity .3s ease";
@@ -175,7 +200,9 @@ function setButtonsDisabled(disabled) {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
   });
-  document.querySelectorAll(".btn-row-action").forEach((b) => (b.disabled = disabled));
+  document.querySelectorAll(".btn-row-action").forEach((b) => {
+    if (!b.closest("#productPagination")) b.disabled = disabled;
+  });
   // Los selectores de envío se controlan por su propia petición.
   document.querySelectorAll("select.envio-select").forEach((s) => (s.disabled = disabled));
 }
@@ -267,6 +294,9 @@ async function init() {
       unsubscribeRealtime();
       state.user = null;
       state.products = [];
+      state.productCounts = { total: 0, visibles: 0, ocultos: 0, sinStock: 0 };
+      state.productsCount = 0;
+      state.productPage = 1;
       state.orders = [];
       state.orderDetails = {};
       state.openOrderId = null;
@@ -364,180 +394,334 @@ async function handleLogout() {
 
 /* ---------- carga de datos ---------- */
 
+function productSearchFilter(term) {
+  const clean = String(term || "")
+    .replace(/[%_,()\\"]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return "%" + clean + "%";
+}
+
+function applyProductFilters(query, stockIds) {
+  if (state.filter === "activo") {
+    query = query.eq("activo", true);
+  } else if (state.filter === "inactivo") {
+    query = query.eq("activo", false);
+  } else if (state.filter === "stock0") {
+    query = stockIds && stockIds.length
+      ? query.in("id_producto", stockIds)
+      : query.eq("id_producto", -1);
+  }
+
+  const term = state.search.trim();
+  if (term) {
+    const pattern = productSearchFilter(term);
+    query = query.or("referencia.ilike." + pattern + ",nombre.ilike." + pattern);
+  }
+
+  return query;
+}
+
+async function getStock0ProductIds(sb) {
+  const ids = [];
+  const seen = new Set();
+  const batchSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await sb
+      .from("inventario")
+      .select("id_producto")
+      .lte("cantidad_disponible", 0)
+      .range(from, from + batchSize - 1);
+    if (error) throw error;
+
+    const chunk = Array.isArray(data) ? data : [];
+    chunk.forEach((row) => {
+      const id = row && row.id_producto;
+      if (id !== null && id !== undefined && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    });
+    if (chunk.length < batchSize) break;
+    from += batchSize;
+  }
+
+  return ids;
+}
+
+async function countProductRows(query) {
+  const { count, error } = await query;
+  if (error) throw error;
+  return Number(count || 0);
+}
+
+async function loadProductCounts(sb, stockIds) {
+  const selectCount = () => sb.from("productos").select("id_producto", { count: "exact", head: true });
+  const stock0Query = stockIds && stockIds.length
+    ? selectCount().in("id_producto", stockIds)
+    : selectCount().eq("id_producto", -1);
+
+  const [total, visibles, ocultos, sinStock, filtrados] = await Promise.all([
+    countProductRows(selectCount()),
+    countProductRows(selectCount().eq("activo", true)),
+    countProductRows(selectCount().eq("activo", false)),
+    countProductRows(stock0Query),
+    countProductRows(applyProductFilters(selectCount(), stockIds))
+  ]);
+
+  return { total, visibles, ocultos, sinStock, filtrados };
+}
+
+function normalizeProductPage() {
+  const totalPages = Math.max(1, Math.ceil(state.productsCount / state.productPageSize));
+  state.productPage = Math.min(totalPages, Math.max(1, state.productPage));
+}
+
 async function loadProducts() {
-  if (state.loading) return;
+  const requestId = ++state.productsRequestId;
   state.loading = true;
   setButtonsDisabled(true);
   showBox("loadingBox", true);
   showBox("errorBox", false);
   showBox("emptyBox", false);
   showBox("tableWrap", false);
-  document.getElementById("adminMobileCards").innerHTML = "";
+  showBox("productPagination", false);
+  const mobile = document.getElementById("adminMobileCards");
+  if (mobile) mobile.textContent = "";
 
   try {
     const sb = getSupabase();
-    const { data, error } = await sb
+    const stockIds = state.filter === "stock0" ? await getStock0ProductIds(sb) : [];
+    const counts = await loadProductCounts(sb, stockIds);
+    if (requestId !== state.productsRequestId) return;
+
+    state.productCounts = counts;
+    state.productsCount = counts.filtrados;
+    normalizeProductPage();
+
+    const desde = (state.productPage - 1) * state.productPageSize;
+    const hasta = desde + state.productPageSize - 1;
+
+    let query = sb
       .from("productos")
       .select(SELECT_PRODUCTOS)
-      .order("creado_en", { ascending: false });
+      .order("referencia", { ascending: true })
+      .range(desde, hasta);
+    query = applyProductFilters(query, stockIds);
 
+    const { data, error } = await query;
     if (error) throw error;
+    if (requestId !== state.productsRequestId) return;
 
     state.products = Array.isArray(data) ? data : [];
-     state.loading = false; 
+    state.loading = false;
     render();
   } catch (error) {
+    if (requestId !== state.productsRequestId) return;
     showBox("loadingBox", false);
     showBox("errorBox", true);
+    showBox("productPagination", false);
     document.getElementById("errorMessage").textContent =
       translateError(error, "Error al consultar productos");
   } finally {
-    state.loading = false;
-    setButtonsDisabled(false);
+    if (requestId === state.productsRequestId) {
+      showBox("loadingBox", false);
+      state.loading = false;
+      setButtonsDisabled(false);
+    }
   }
-}
-
-function filteredProducts() {
-  const term = state.search.trim().toLowerCase();
-  return state.products.filter((p) => {
-    if (state.filter === "activo" && !p.activo) return false;
-    if (state.filter === "inactivo" && p.activo) return false;
-    if (state.filter === "stock0" && getStock(p) > 0) return false;
-    if (!term) return true;
-    return (
-      String(p.nombre || "").toLowerCase().includes(term) ||
-      String(p.referencia || "").toLowerCase().includes(term) ||
-      String(p.categoria || "").toLowerCase().includes(term)
-    );
-  });
 }
 
 function render() {
   updateStats();
   showBox("loadingBox", false);
+  showBox("errorBox", false);
 
-  const list = filteredProducts();
-  const hasData = state.products.length > 0;
-  const hasResults = list.length > 0;
-
-  if (state.loading) return;
-
-  if (!hasData) {
-    showBox("errorBox", false);
+  if (!state.products.length) {
     showBox("tableWrap", false);
-    document.getElementById("adminMobileCards").innerHTML = "";
+    const mobile = document.getElementById("adminMobileCards");
+    if (mobile) mobile.textContent = "";
     showBox("emptyBox", true);
-    document.querySelector("#emptyBox .state-title").textContent = "Todavía no hay productos";
+    document.querySelector("#emptyBox .state-title").textContent = "No hay productos con estos filtros";
     document.getElementById("emptyMessage").textContent =
-      "Crea el primer producto con el botón + Nuevo producto.";
-    return;
-  }
-
-  if (!hasResults) {
-    showBox("errorBox", false);
-    showBox("tableWrap", false);
-    document.getElementById("adminMobileCards").innerHTML = "";
-    showBox("emptyBox", true);
-    document.querySelector("#emptyBox .state-title").textContent = "Sin resultados";
-    document.getElementById("emptyMessage").textContent =
-      "Ningún producto coincide con la búsqueda o el filtro seleccionado.";
+      "Ajusta la búsqueda o el filtro, o crea el primer producto.";
+    updatePagination();
     return;
   }
 
   showBox("emptyBox", false);
-  renderTable(list);
-  renderMobileCards(list);
+  renderTable(state.products);
+  renderMobileCards(state.products);
+  updatePagination();
 }
 
 function updateStats() {
-  const total = state.products.length;
-  const visibles = state.products.filter((p) => p.activo).length;
-  const sinStock = state.products.filter((p) => getStock(p) <= 0).length;
-  document.getElementById("statTotal").textContent = total;
-  document.getElementById("statVisible").textContent = visibles;
-  document.getElementById("statOculto").textContent = total - visibles;
-  document.getElementById("statSinStock").textContent = sinStock;
+  document.getElementById("statTotal").textContent = state.productCounts.total;
+  document.getElementById("statVisible").textContent = state.productCounts.visibles;
+  document.getElementById("statOculto").textContent = state.productCounts.ocultos;
+  document.getElementById("statSinStock").textContent = state.productCounts.sinStock;
 }
 
-function stockBadgeHtml(stock) {
-  if (stock <= 0) return '<span class="stock-badge zero">0</span>';
-  if (stock <= 3) return '<span class="stock-badge low">' + stock + "</span>";
-  return '<span class="stock-badge">' + stock + "</span>";
+function updatePagination() {
+  const wrap = document.getElementById("productPagination");
+  if (!wrap) return;
+
+  if (!state.products.length) {
+    showBox("productPagination", false);
+    return;
+  }
+
+  const desde = (state.productPage - 1) * state.productPageSize + 1;
+  const hasta = desde + state.products.length - 1;
+  const totalPages = Math.max(1, Math.ceil(state.productsCount / state.productPageSize));
+  const info = document.getElementById("productPageInfo");
+  if (info) info.textContent = "Mostrando " + desde + "–" + hasta + " de " + state.productsCount;
+
+  const prev = document.getElementById("prevProductPageBtn");
+  const next = document.getElementById("nextProductPageBtn");
+  if (prev) prev.disabled = state.productPage <= 1;
+  if (next) next.disabled = state.productPage >= totalPages;
+
+  showBox("productPagination", true);
 }
 
-function imageHtml(p, sizeClass) {
+function changeProductPage(delta) {
+  const totalPages = Math.max(1, Math.ceil(state.productsCount / state.productPageSize));
+  const nextPage = Math.min(totalPages, Math.max(1, state.productPage + delta));
+  if (nextPage === state.productPage) return;
+  state.productPage = nextPage;
+  loadProducts();
+}
+
+function stockBadgeNode(stock) {
+  const cls = stock <= 0 ? "stock-badge zero" : stock <= 3 ? "stock-badge low" : "stock-badge";
+  return createEl("span", cls, stock);
+}
+
+function visibilityBadgeNode(activo) {
+  return createEl("span", "badge " + (activo ? "visible" : "oculto"), activo ? "Visible" : "Oculto");
+}
+
+function imageNode(p, sizeClass) {
   const cls = sizeClass || "cell-img";
   if (p.imagen_url) {
-    return '<img class="' + cls + '" src="' + escapeHtml(p.imagen_url) + '" alt="" ' +
-      'onerror="this.style.visibility=\'hidden\'">';
+    const img = createEl("img", cls);
+    img.src = String(p.imagen_url);
+    img.alt = "";
+    img.addEventListener("error", () => { img.style.visibility = "hidden"; }, { once: true });
+    return img;
   }
-  return '<div class="' + cls + '" style="display:flex;align-items:center;justify-content:center;' +
-    'color:#9ca3af;font-size:.65rem;text-align:center;">Sin img</div>';
+  return createEl("div", cls, "sin imagen");
+}
+
+function productActionsNode(p) {
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(actionButton("edit", p.id_producto, "Editar"));
+  wrap.appendChild(actionButton("toggle", p.id_producto, p.activo ? "Ocultar" : "Mostrar", "warn"));
+  return wrap;
+}
+
+function productOfferText(p) {
+  if (p.en_oferta && p.precio_oferta !== null && p.precio_oferta !== undefined) {
+    return formatPrecio(p.precio_oferta);
+  }
+  return "-";
 }
 
 function renderTable(list) {
   const body = document.getElementById("adminTableBody");
-  body.innerHTML = list
-    .map((p) => {
-      const stock = getStock(p);
-      const reservado = getReservado(p);
-      return (
-        "<tr" + (p.activo ? "" : ' class="is-hidden"') + ">" +
-        "<td>" + imageHtml(p) + "</td>" +
-        '<td class="cell-ref">' + escapeHtml(p.referencia) + "</td>" +
-        '<td class="cell-name">' + escapeHtml(p.nombre) + "</td>" +
-        "<td>" + escapeHtml(p.categoria || "-") + "</td>" +
-        '<td class="cell-price">' + formatPrecio(p.precio) + "</td>" +
-        '<td class="cell-price">' + (p.pedidos_clientes !== null && p.pedidos_clientes !== undefined ? formatPrecio(p.pedidos_clientes) : "-") + "</td>" +
-        '<td class="cell-stock">' + stockBadgeHtml(stock) +
-          (reservado > 0 ? '<br><small style="color:#6B7280;">res. ' + reservado + "</small>" : "") +
-        "</td>" +
-        '<td class="cell-stock"><span class="badge ' + (p.activo ? "visible" : "oculto") + '">' +
-          (p.activo ? "Visible" : "Oculto") + "</span></td>" +
-        '<td class="cell-actions">' +
-          '<button class="btn-row-action" type="button" data-action="edit" data-id="' + p.id_producto + '">Editar</button>' +
-          '<button class="btn-row-action warn" type="button" data-action="toggle" data-id="' + p.id_producto + '">' +
-            (p.activo ? "Ocultar" : "Mostrar") + "</button>" +
-        "</td>" +
-        "</tr>"
-      );
-    })
-    .join("");
+  body.textContent = "";
+
+  list.forEach((p) => {
+    const stock = getStock(p);
+    const reservado = getReservado(p);
+    const tr = createEl("tr");
+    if (!p.activo) tr.className = "is-hidden";
+
+    let td = createEl("td");
+    td.appendChild(imageNode(p));
+    tr.appendChild(td);
+
+    tr.appendChild(createEl("td", "cell-ref", p.referencia));
+    tr.appendChild(createEl("td", "cell-name", p.nombre));
+    tr.appendChild(createEl("td", "", p.categoria || "-"));
+    tr.appendChild(createEl("td", "cell-price", formatPrecio(p.precio)));
+    tr.appendChild(createEl("td", "cell-price", productOfferText(p)));
+
+    td = createEl("td", "cell-stock");
+    td.appendChild(stockBadgeNode(stock));
+    if (reservado > 0) {
+      td.appendChild(createEl("br"));
+      const small = createEl("small", "", "res. " + reservado);
+      small.style.color = "#6B7280";
+      td.appendChild(small);
+    }
+    tr.appendChild(td);
+
+    td = createEl("td", "cell-stock");
+    td.appendChild(visibilityBadgeNode(p.activo));
+    tr.appendChild(td);
+
+    td = createEl("td", "cell-actions");
+    td.appendChild(productActionsNode(p));
+    tr.appendChild(td);
+
+    body.appendChild(tr);
+  });
 
   showBox("tableWrap", true);
 }
 
 function renderMobileCards(list) {
-  document.getElementById("adminMobileCards").innerHTML = list
-    .map((p) => {
-      const stock = getStock(p);
-      return (
-        '<div class="m-card"' + (p.activo ? "" : ' style="opacity:.6"') + ">" +
-        imageHtml(p, "m-card-img") +
-        '<div class="m-card-body">' +
-          '<div class="m-card-top">' +
-            '<div class="m-card-name">' + escapeHtml(p.nombre) + "</div>" +
-            '<span class="badge ' + (p.activo ? "visible" : "oculto") + '">' +
-              (p.activo ? "Visible" : "Oculto") + "</span>" +
-          "</div>" +
-          '<div class="m-card-meta">' +
-            "<span>Ref. " + escapeHtml(p.referencia) + "</span>" +
-            "<span>" + formatPrecio(p.precio) + "</span>" +
-            "<span>Stock: " + stockBadgeHtml(stock) + "</span>" +
-          "</div>" +
-          '<div class="m-card-actions">' +
-            '<button class="btn-row-action" type="button" data-action="edit" data-id="' + p.id_producto + '">Editar</button>' +
-            '<button class="btn-row-action warn" type="button" data-action="toggle" data-id="' + p.id_producto + '">' +
-              (p.activo ? "Ocultar" : "Mostrar") + "</button>" +
-          "</div>" +
-        "</div>" +
-        "</div>"
-      );
-    })
-    .join("");
+  const cont = document.getElementById("adminMobileCards");
+  cont.textContent = "";
+
+  list.forEach((p) => {
+    const card = createEl("div", "m-card");
+    if (!p.activo) card.style.opacity = "0.6";
+    card.appendChild(imageNode(p, "m-card-img"));
+
+    const body = createEl("div", "m-card-body");
+    const top = createEl("div", "m-card-top");
+    top.appendChild(createEl("div", "m-card-name", p.nombre));
+    top.appendChild(visibilityBadgeNode(p.activo));
+    body.appendChild(top);
+
+    const meta = createEl("div", "m-card-meta");
+    meta.appendChild(createEl("span", "", "Ref. " + p.referencia));
+    meta.appendChild(createEl("span", "", "Categoría: " + (p.categoria || "-")));
+    meta.appendChild(createEl("span", "", formatPrecio(p.precio)));
+    meta.appendChild(createEl("span", "", "Oferta: " + productOfferText(p)));
+    const stockSpan = createEl("span", "", "Stock: ");
+    stockSpan.appendChild(stockBadgeNode(getStock(p)));
+    meta.appendChild(stockSpan);
+    body.appendChild(meta);
+
+    const actions = createEl("div", "m-card-actions");
+    actions.appendChild(productActionsNode(p));
+    body.appendChild(actions);
+
+    card.appendChild(body);
+    cont.appendChild(card);
+  });
 }
 
 /* ---------- modal ---------- */
+
+function parseFormTonos(valor) {
+  const seen = new Set();
+  return String(valor || "")
+    .split(/\r?\n/)
+    .map((linea) => linea.replace(/\s+/g, " ").trim().replace(/^\d+\.\s*/, "").trim())
+    .filter((tono) => {
+      const key = tono.toLocaleLowerCase("es");
+      if (!tono || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
 
 function openProductModal(producto) {
   state.editingId = producto ? producto.id_producto : null;
@@ -551,30 +735,37 @@ function openProductModal(producto) {
   modalError.classList.remove("visible");
   modalError.textContent = "";
 
-  document.getElementById("fReferencia").value = producto ? producto.referencia || "" : "";
+  const referencia = document.getElementById("fReferencia");
+  referencia.value = producto ? producto.referencia || "" : "";
+  referencia.readOnly = !!producto;
   document.getElementById("fNombre").value = producto ? producto.nombre || "" : "";
-  document.getElementById("fDescripcion").value = producto ? producto.descripcion || "" : "";
-  document.getElementById("fPrecio").value = producto ? producto.precio : "";
   document.getElementById("fCategoria").value = producto ? producto.categoria || "" : "";
-  document.getElementById("fImagen").value = producto ? producto.imagen || "" : "";
+  document.getElementById("fDescripcion").value = producto ? producto.descripcion || "" : "";
+  document.getElementById("fTonos").value = producto && Array.isArray(producto.tonos)
+    ? producto.tonos.join("\n")
+    : "";
   document.getElementById("fStock").value = producto ? getStock(producto) : 0;
+  document.getElementById("fPrecio").value = producto ? producto.precio : "";
+  document.getElementById("fPrecioOferta").value = producto && producto.en_oferta && producto.precio_oferta !== null && producto.precio_oferta !== undefined
+    ? producto.precio_oferta
+    : "";
   document.getElementById("fActivo").checked = producto ? !!producto.activo : true;
-  document.getElementById("fPedidosClientes").value = producto && producto.pedidos_clientes !== null && producto.pedidos_clientes !== undefined ? producto.pedidos_clientes : "";
 
   fillCategoryList();
-  updateImagePreview();
-
   document.querySelectorAll("#productForm .form-group").forEach((g) => g.classList.remove("error"));
 
   document.getElementById("productModal").classList.add("active");
-  setTimeout(() => document.getElementById("fReferencia").focus(), 80);
+  setTimeout(() => (producto ? document.getElementById("fNombre") : referencia).focus(), 80);
 }
 
 function closeProductModal() {
   document.getElementById("productModal").classList.remove("active");
   document.getElementById("productForm").reset();
+  document.getElementById("fReferencia").readOnly = false;
   document.getElementById("fActivo").checked = true;
-  document.getElementById("imgPreview").style.display = "none";
+  const btn = document.getElementById("productSubmitBtn");
+  btn.disabled = false;
+  btn.textContent = "Guardar producto";
   document.querySelectorAll("#productForm .form-group").forEach((g) => g.classList.remove("error"));
   state.editingId = null;
 }
@@ -587,49 +778,86 @@ function fillCategoryList() {
     if (c && categorias.indexOf(c) === -1) categorias.push(c);
   });
   categorias.sort();
-  list.innerHTML = categorias.map((c) => '<option value="' + escapeHtml(c) + '">').join("");
+  list.textContent = "";
+  categorias.forEach((c) => {
+    const option = document.createElement("option");
+    option.value = c;
+    option.textContent = c;
+    list.appendChild(option);
+  });
 }
 
-function updateImagePreview() {
-  const valor = document.getElementById("fImagen").value.trim();
-  const preview = document.getElementById("imgPreview");
-  if (!valor) {
-    preview.style.display = "none";
-    preview.src = "";
-    return;
-  }
-  preview.src = valor;
-  preview.style.display = "block";
-}
-
-function showFieldError(inputId, groupIndex) {
+function showFieldError(inputId) {
   const input = document.getElementById(inputId);
-  if (!input) return false;
+  if (!input) return;
   const group = input.closest(".form-group");
   if (group) group.classList.add("error");
-  return false;
 }
 
-function validateForm() {
+function validateProductForm() {
   document.querySelectorAll("#productForm .form-group").forEach((g) => g.classList.remove("error"));
 
+  const errores = [];
   const referencia = document.getElementById("fReferencia").value.trim();
   const nombre = document.getElementById("fNombre").value.trim();
   const categoria = document.getElementById("fCategoria").value.trim();
-  const precioRaw = document.getElementById("fPrecio").value;
-  const stockRaw = document.getElementById("fStock").value;
+  const precioRaw = document.getElementById("fPrecio").value.trim();
+  const stockRaw = document.getElementById("fStock").value.trim();
+  const ofertaRaw = document.getElementById("fPrecioOferta").value.trim();
+  const descripcionRaw = document.getElementById("fDescripcion").value;
 
-  let ok = true;
-  if (!referencia) ok = showFieldError("fReferencia");
-  if (!nombre) ok = showFieldError("fNombre");
-  if (!categoria) ok = showFieldError("fCategoria");
-  if (precioRaw === "" || isNaN(Number(precioRaw)) || Number(precioRaw) < 0) {
-    ok = showFieldError("fPrecio");
+  const precio = Number(precioRaw);
+  const precioValido = precioRaw !== "" && Number.isFinite(precio) && precio > 0;
+  const stock = Number(stockRaw);
+  const stockValido = stockRaw !== "" && Number.isInteger(stock) && stock >= 0;
+
+  if (!referencia) {
+    showFieldError("fReferencia");
+    errores.push("La referencia es obligatoria.");
   }
-  if (stockRaw === "" || isNaN(Number(stockRaw)) || Number(stockRaw) < 0) {
-    ok = showFieldError("fStock");
+  if (!nombre) {
+    showFieldError("fNombre");
+    errores.push("El nombre es obligatorio.");
   }
-  return ok;
+  if (!categoria) {
+    showFieldError("fCategoria");
+    errores.push("La categoría es obligatoria.");
+  }
+  if (!precioValido) {
+    showFieldError("fPrecio");
+    errores.push("El precio debe ser un número mayor que 0.");
+  }
+  if (!stockValido) {
+    showFieldError("fStock");
+    errores.push("La cantidad disponible debe ser un entero mayor o igual a 0.");
+  }
+
+  let precioOferta = null;
+  if (ofertaRaw !== "") {
+    const oferta = Number(ofertaRaw);
+    if (!Number.isFinite(oferta) || oferta <= 0 || !precioValido || oferta >= precio) {
+      showFieldError("fPrecioOferta");
+      errores.push("El precio de oferta debe ser mayor que 0 y menor que el precio.");
+    } else {
+      precioOferta = oferta;
+    }
+  }
+
+  return {
+    ok: errores.length === 0,
+    message: errores.join(" "),
+    values: {
+      referencia,
+      nombre,
+      categoria,
+      descripcion: descripcionRaw.trim() === "" ? null : descripcionRaw,
+      tonos: parseFormTonos(document.getElementById("fTonos").value),
+      precio,
+      stock,
+      precioOferta,
+      activo: document.getElementById("fActivo").checked
+    }
+  };
 }
 
 /* ---------- escrituras ---------- */
@@ -640,24 +868,25 @@ async function handleSubmit(event) {
   const modalError = document.getElementById("modalError");
   modalError.classList.remove("visible");
 
-  if (!validateForm()) {
-    modalError.textContent = "Revisa los campos marcados en rojo.";
+  const resultado = validateProductForm();
+  if (!resultado.ok) {
+    modalError.textContent = resultado.message || "Revisa los campos marcados en rojo.";
     modalError.classList.add("visible");
     return;
   }
 
-  const pedidosClientesVal = document.getElementById("fPedidosClientes").value.trim();
+  const values = resultado.values;
   const payload = {
-    referencia: document.getElementById("fReferencia").value.trim(),
-    nombre: document.getElementById("fNombre").value.trim(),
-    descripcion: document.getElementById("fDescripcion").value.trim() || null,
-    precio: Number(document.getElementById("fPrecio").value),
-    imagen: document.getElementById("fImagen").value.trim() || null,
-    categoria: document.getElementById("fCategoria").value.trim(),
-    activo: document.getElementById("fActivo").checked,
-    pedidos_clientes: pedidosClientesVal === "" ? null : Number(pedidosClientesVal)
+    referencia: values.referencia,
+    nombre: values.nombre,
+    categoria: values.categoria,
+    descripcion: values.descripcion,
+    tonos: values.tonos,
+    precio: values.precio,
+    en_oferta: values.precioOferta !== null,
+    precio_oferta: values.precioOferta,
+    activo: values.activo
   };
-  const stock = Number(document.getElementById("fStock").value);
   const editando = state.editingId !== null;
 
   const btn = document.getElementById("productSubmitBtn");
@@ -688,23 +917,25 @@ async function handleSubmit(event) {
       if (!idProducto) throw new Error("No se obtuvo el id del producto creado.");
     }
 
-    const { error: errorInv } = await sb
+    const { data: inventarioData, error: errorInv } = await sb
       .from("inventario")
-      .upsert(
-        { id_producto: idProducto, cantidad_disponible: stock },
-        { onConflict: "id_producto" }
-      );
+      .update({ cantidad_disponible: values.stock })
+      .eq("id_producto", idProducto)
+      .select("id_producto");
 
     if (errorInv) throw errorInv;
+    if (!Array.isArray(inventarioData) || !inventarioData.length) {
+      throw new Error("No se encontró la fila de inventario creada por el trigger crear_inventario_inicial.");
+    }
 
     closeProductModal();
-    showToast(
-      editando ? "Producto actualizado correctamente." : "Producto creado correctamente.",
-      "success"
-    );
     await loadProducts();
+    showToast("Producto guardado", "success");
   } catch (error) {
-    const msg = translateError(error, "No se pudo guardar el producto");
+    const duplicado = error && (error.code === "23505" || /duplicate key|unique/i.test(String(error.message || "")));
+    const msg = duplicado
+      ? "Ya existe un producto con esa referencia"
+      : translateError(error, "No se pudo guardar el producto");
     modalError.textContent = msg;
     modalError.classList.add("visible");
     showToast(msg, "error", "Error al guardar");
@@ -715,24 +946,27 @@ async function handleSubmit(event) {
 }
 
 async function toggleActivo(idProducto) {
-  const producto = state.products.find((p) => p.id_producto === idProducto);
+  const producto = state.products.find((p) => String(p.id_producto) === String(idProducto));
   if (!producto) return;
 
   const nuevoValor = !producto.activo;
+  const mensaje = nuevoValor
+    ? "¿Mostrar este producto en el catálogo?"
+    : "¿Ocultar este producto del catálogo? No se eliminará.";
+  if (!confirm(mensaje)) return;
 
   try {
     const sb = getSupabase();
     const { data, error } = await sb
       .from("productos")
       .update({ activo: nuevoValor })
-      .eq("id_producto", idProducto)
+      .eq("id_producto", producto.id_producto)
       .select("id_producto, activo")
       .single();
 
     if (error) throw error;
 
-    if (data) producto.activo = data.activo;
-    render();
+    await loadProducts();
     showToast(
       nuevoValor
         ? "El producto volvió a ser visible en el catálogo."
@@ -774,10 +1008,12 @@ function estadoResena(r) {
   return { key: "pendiente", label: "Pendiente", badge: "pendiente" };
 }
 
-function estrellasHtml(valor) {
+function estrellasNode(valor) {
   const v = Math.max(0, Math.min(5, parseInt(valor) || 0));
-  return '<span class="rev-stars" aria-label="' + v + ' de 5">' +
-    "★".repeat(v) + "☆".repeat(5 - v) + "</span>";
+  const span = createEl("span", "rev-stars");
+  span.setAttribute("aria-label", v + " de 5");
+  span.textContent = "★".repeat(v) + "☆".repeat(5 - v);
+  return span;
 }
 
 function filteredResenas() {
@@ -794,7 +1030,7 @@ async function loadResenas() {
   showBox("revErrorBox", false);
   showBox("revEmptyBox", false);
   showBox("revTableWrap", false);
-  document.getElementById("revMobileCards").innerHTML = "";
+  document.getElementById("revMobileCards").textContent = "";
 
   try {
     const sb = getSupabase();
@@ -833,7 +1069,7 @@ function renderResenas() {
   if (!state.resenas.length) {
     showBox("revErrorBox", false);
     showBox("revTableWrap", false);
-    document.getElementById("revMobileCards").innerHTML = "";
+    document.getElementById("revMobileCards").textContent = "";
     showBox("revEmptyBox", true);
     document.getElementById("revEmptyTitle").textContent = "Todavía no hay reseñas";
     document.getElementById("revEmptyMessage").textContent =
@@ -844,7 +1080,7 @@ function renderResenas() {
   if (!list.length) {
     showBox("revErrorBox", false);
     showBox("revTableWrap", false);
-    document.getElementById("revMobileCards").innerHTML = "";
+    document.getElementById("revMobileCards").textContent = "";
     showBox("revEmptyBox", true);
     document.getElementById("revEmptyTitle").textContent = "Sin resultados";
     document.getElementById("revEmptyMessage").textContent =
@@ -861,68 +1097,93 @@ function renderReviewChips() {
   const cont = document.getElementById("reviewChips");
   if (!cont) return;
 
-  cont.innerHTML = RESENA_FILTROS.map((opt) => {
+  cont.textContent = "";
+  RESENA_FILTROS.forEach((opt) => {
     const n = opt.value === "todas"
       ? state.resenas.length
       : state.resenas.filter((r) => estadoResena(r).key === RESENA_ESTADO_SINGULAR[opt.value]).length;
-    return (
-      '<button class="chip' + (state.reviewFilter === opt.value ? " active" : "") +
-      '" type="button" data-review-filter="' + opt.value + '">' +
-      escapeHtml(opt.label) + '<span class="chip-n">' + n + "</span></button>"
-    );
-  }).join("");
+    const btn = createEl("button", "chip" + (state.reviewFilter === opt.value ? " active" : ""));
+    btn.type = "button";
+    btn.setAttribute("data-review-filter", opt.value);
+    btn.appendChild(document.createTextNode(opt.label));
+    btn.appendChild(createEl("span", "chip-n", n));
+    cont.appendChild(btn);
+  });
 }
 
-function resenaAccionesHtml(r) {
-  return (
-    '<button class="btn-row-action" type="button" data-action="resena-publicar" data-id="' + r.id_resena + '">Publicar</button>' +
-    '<button class="btn-row-action warn" type="button" data-action="resena-ocultar" data-id="' + r.id_resena + '">Ocultar</button>' +
-    '<button class="btn-row-action" type="button" data-action="resena-editar" data-id="' + r.id_resena + '">Editar</button>'
-  );
+function resenaAccionesNode(r) {
+  const frag = document.createDocumentFragment();
+  frag.appendChild(actionButton("resena-publicar", r.id_resena, "Publicar"));
+  frag.appendChild(actionButton("resena-ocultar", r.id_resena, "Ocultar", "warn"));
+  frag.appendChild(actionButton("resena-editar", r.id_resena, "Editar"));
+  return frag;
 }
 
 function renderResenasTable(list) {
-  document.getElementById("revTableBody").innerHTML = list
-    .map((r) => {
-      const st = estadoResena(r);
-      return (
-        "<tr" + (st.key === "publicada" ? "" : ' class="is-hidden"') + ">" +
-        "<td><strong>" + escapeHtml(getReviewName(r) || "Anónima") + "</strong></td>" +
-        "<td>" + estrellasHtml(r.calificacion) + "</td>" +
-        '<td class="cell-comment">' + escapeHtml(r.comentario || "") + "</td>" +
-        '<td style="white-space:nowrap;">' + formatFecha(r.creado_en) + "</td>" +
-        '<td><span class="badge ' + st.badge + '">' + st.label + "</span></td>" +
-        '<td class="cell-actions">' + resenaAccionesHtml(r) + "</td>" +
-        "</tr>"
-      );
-    })
-    .join("");
+  const tbody = document.getElementById("revTableBody");
+  tbody.textContent = "";
+
+  list.forEach((r) => {
+    const st = estadoResena(r);
+    const tr = createEl("tr", st.key === "publicada" ? "" : "is-hidden");
+
+    const tdNombre = createEl("td");
+    tdNombre.appendChild(createEl("strong", null, getReviewName(r) || "Anónima"));
+    tr.appendChild(tdNombre);
+
+    const tdEstrellas = createEl("td");
+    tdEstrellas.appendChild(estrellasNode(r.calificacion));
+    tr.appendChild(tdEstrellas);
+
+    tr.appendChild(createEl("td", "cell-comment", r.comentario || ""));
+
+    const tdFecha = createEl("td", null, formatFecha(r.creado_en));
+    tdFecha.style.whiteSpace = "nowrap";
+    tr.appendChild(tdFecha);
+
+    const tdEstado = createEl("td");
+    tdEstado.appendChild(createEl("span", "badge " + st.badge, st.label));
+    tr.appendChild(tdEstado);
+
+    const tdAcciones = createEl("td", "cell-actions");
+    tdAcciones.appendChild(resenaAccionesNode(r));
+    tr.appendChild(tdAcciones);
+
+    tbody.appendChild(tr);
+  });
 
   showBox("revTableWrap", true);
 }
 
 function renderResenasMobile(list) {
-  document.getElementById("revMobileCards").innerHTML = list
-    .map((r) => {
-      const st = estadoResena(r);
-      return (
-        '<div class="m-card"' + (st.key === "publicada" ? "" : ' style="opacity:.75"') + ">" +
-          '<div class="m-card-body">' +
-            '<div class="m-card-top">' +
-              '<div class="m-card-name">' + escapeHtml(getReviewName(r) || "Anónima") + "</div>" +
-              '<span class="badge ' + st.badge + '">' + st.label + "</span>" +
-            "</div>" +
-            '<div class="m-card-meta">' +
-              "<span>" + estrellasHtml(r.calificacion) + "</span>" +
-              "<span>" + formatFecha(r.creado_en) + "</span>" +
-            "</div>" +
-            '<p class="m-card-comment">' + escapeHtml(r.comentario || "") + "</p>" +
-            '<div class="m-card-actions">' + resenaAccionesHtml(r) + "</div>" +
-          "</div>" +
-        "</div>"
-      );
-    })
-    .join("");
+  const cont = document.getElementById("revMobileCards");
+  cont.textContent = "";
+
+  list.forEach((r) => {
+    const st = estadoResena(r);
+    const card = createEl("div", "m-card");
+    if (st.key !== "publicada") card.style.opacity = "0.75";
+
+    const body = createEl("div", "m-card-body");
+    const top = createEl("div", "m-card-top");
+    top.appendChild(createEl("div", "m-card-name", getReviewName(r) || "Anónima"));
+    top.appendChild(createEl("span", "badge " + st.badge, st.label));
+    body.appendChild(top);
+
+    const meta = createEl("div", "m-card-meta");
+    meta.appendChild(estrellasNode(r.calificacion));
+    meta.appendChild(createEl("span", null, formatFecha(r.creado_en)));
+    body.appendChild(meta);
+
+    body.appendChild(createEl("p", "m-card-comment", r.comentario || ""));
+
+    const actions = createEl("div", "m-card-actions");
+    actions.appendChild(resenaAccionesNode(r));
+    body.appendChild(actions);
+
+    card.appendChild(body);
+    cont.appendChild(card);
+  });
 }
 
 async function setResenaEstado(idResena, aprobada) {
@@ -2325,6 +2586,18 @@ const PRODUCT_VERIFY_SELECT =
   "referencia, nombre, precio, activo, en_oferta, precio_oferta, imagen_url," +
   " inventario ( cantidad_disponible )";
 
+const PRODUCT_IMPORT_SELECT =
+  "id_producto, referencia, nombre, descripcion, categoria, precio, activo, en_oferta, precio_oferta, tonos, imagen_url," +
+  " inventario ( cantidad_disponible )";
+
+const EXPORT_PRODUCTOS_SELECT =
+  "id_producto, referencia, nombre, descripcion, precio, categoria, tonos, activo, en_oferta, precio_oferta," +
+  " pedidos_clientes, proveedores ( nombre ), inventario ( cantidad_disponible )";
+
+const EXPORT_PRODUCT_WIDTHS = [14, 34, 70, 13, 20, 26, 48, 9, 13, 17, 19, 9];
+
+const EXPORT_PRICE_FORMAT = '"$" #,##0';
+
 const productImportState = {
   excelRows: [],
   excelFileName: "",
@@ -2389,6 +2662,46 @@ function productCellText(cell) {
   const value = productUnwrapCellValue(cell.value);
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function wrapRichTextPart(text, bold, italic) {
+  if (!text || (!bold && !italic)) return text;
+
+  const start = (bold ? "*" : "") + (italic ? "_" : "");
+  const end = (italic ? "_" : "") + (bold ? "*" : "");
+
+  return text
+    .split("\n")
+    .map((line) => {
+      const leading = (line.match(/^\s*/) || [""])[0];
+      const trailing = (line.match(/\s*$/) || [""])[0];
+      let content = line.slice(leading.length);
+      content = content.slice(0, Math.max(0, content.length - trailing.length));
+      if (!content) return line;
+      return leading + start + content + end + trailing;
+    })
+    .join("\n");
+}
+
+function celdaAMarca(cell) {
+  if (!cell) return "";
+
+  const value = cell.value;
+  if (value && typeof value === "object" && Array.isArray(value.richText)) {
+    return value.richText
+      .map((part) => {
+        const text = part && part.text !== null && part.text !== undefined
+          ? String(part.text).replace(/\r\n?/g, "\n")
+          : "";
+        const font = (part && part.font) || {};
+        return wrapRichTextPart(text, !!font.bold, !!font.italic);
+      })
+      .join("");
+  }
+
+  const raw = productUnwrapCellValue(value);
+  if (raw === null || raw === undefined) return "";
+  return String(raw).replace(/\r\n?/g, "\n").trim();
 }
 
 function parseProductNumber(value) {
@@ -2461,14 +2774,18 @@ function productProviderName(provider) {
   return String(provider.nombre || provider.nombre_proveedor || "").trim();
 }
 
-async function fetchAllTableRows(table, select, pageSize) {
+async function fetchAllTableRows(table, select, pageSize, order) {
   const sb = getSupabase();
   const size = pageSize || 1000;
   const rows = [];
   let from = 0;
 
   while (true) {
-    const { data, error } = await sb.from(table).select(select).range(from, from + size - 1);
+    let query = sb.from(table).select(select);
+    if (order && order.column) {
+      query = query.order(order.column, { ascending: order.ascending !== false });
+    }
+    const { data, error } = await query.range(from, from + size - 1);
     if (error) throw error;
     const chunk = Array.isArray(data) ? data : [];
     rows.push.apply(rows, chunk);
@@ -2670,7 +2987,7 @@ async function handleProductExcelFile(file) {
     await parseProductExcel(file);
     const label = document.getElementById("productExcelFileName");
     if (label) label.textContent = file.name;
-    buildProductImportPreview();
+    await buildProductImportPreview();
   } catch (error) {
     productImportState.excelRows = [];
     productImportState.excelFileName = "";
@@ -2732,7 +3049,7 @@ async function parseProductExcel(file) {
       numero: rowNumber,
       referencia,
       nombre: texts.nombre,
-      descripcion: texts.descripcion,
+      descripcion: celdaAMarca(row.getCell(headers.descripcion)),
       precioRaw: values.precio,
       categoria: texts.categoria,
       proveedor: texts.proveedor,
@@ -2753,7 +3070,7 @@ async function parseProductExcel(file) {
   productImportState.excelFileName = file.name;
 }
 
-function handleProductImageFiles(fileList) {
+async function handleProductImageFiles(fileList) {
   if (productImportState.running) return;
   const incoming = Array.from(fileList || []).filter(Boolean);
   if (!incoming.length) return;
@@ -2788,37 +3105,55 @@ function handleProductImageFiles(fileList) {
     showToast(rejected.length + " imagen(es) no se cargaron. Revisa el detalle.", "error", "Imágenes");
   }
 
-  buildProductImportPreview();
+  await buildProductImportPreview();
 }
 
-function buildProductImportPreview() {
+async function buildProductImportPreview() {
   const summary = document.getElementById("productImportSummary");
   const confirmBtn = document.getElementById("productImportConfirmBtn");
   const imageHint = document.getElementById("productImportImageHint");
   const rows = productImportState.excelRows;
+  const images = productImportState.images;
 
-  if (!rows.length) {
+  if (!rows.length && !images.length) {
     productImportState.items = [];
-    if (summary) summary.textContent = "Selecciona el Excel y arrastra las imágenes para ver la vista previa.";
-    if (confirmBtn) confirmBtn.disabled = true;
+    if (summary) summary.textContent = "Selecciona el Excel y/o arrastra las imágenes para ver la vista previa.";
+    if (confirmBtn) {
+      confirmBtn.textContent = "Importar productos";
+      confirmBtn.disabled = true;
+    }
     if (imageHint) {
       imageHint.className = "import-hint" + (productImportState.imageErrors.length ? " is-error" : "");
       imageHint.textContent = productImportState.imageErrors.join(" ");
     }
-    renderProductImportList([], productImportState.images, productImportState.imageErrors);
+    renderProductImportList([], [], productImportState.imageErrors);
+    return;
+  }
+
+  let catalog = [];
+  try {
+    catalog = await fetchAllTableRows("productos", PRODUCT_IMPORT_SELECT, 1000);
+  } catch (error) {
+    productImportState.items = [];
+    if (summary) summary.textContent = translateError(error, "No se pudieron consultar los productos");
+    if (confirmBtn) confirmBtn.disabled = true;
+    renderProductImportList([], [], productImportState.imageErrors);
     return;
   }
 
   const fileMap = new Map();
-  productImportState.images.forEach((file) => {
+  images.forEach((file) => {
     const key = productImageKey(file.name);
     if (key) fileMap.set(key, file);
   });
 
   const existingMap = new Map();
-  state.products.forEach((product) => {
+  const existingImageMap = new Map();
+  catalog.forEach((product) => {
     const key = productReferenceKey(product.referencia);
     if (key) existingMap.set(key, product);
+    const matchKey = importCompareKey(product.referencia);
+    if (matchKey && !existingImageMap.has(matchKey)) existingImageMap.set(matchKey, product);
   });
 
   const seen = new Set();
@@ -2878,7 +3213,7 @@ function buildProductImportPreview() {
       referencia,
       refKey,
       nombre,
-      descripcion: String(row.descripcion || "").trim(),
+      descripcion: String(row.descripcion || ""),
       precio,
       categoria: String(row.categoria || "").trim(),
       proveedor: String(row.proveedor || "").trim(),
@@ -2896,29 +3231,53 @@ function buildProductImportPreview() {
     };
   });
 
-  productImportState.items = items;
-
-  const validKeys = new Set(
-    items
-      .filter((item) => !item.errors.length && item.referencia)
-      .map((item) => importCompareKey(item.referencia))
+  const excelImageKeys = new Set(
+    items.filter((item) => item.imageFile).map((item) => productImageKey(item.imageFile.name)).filter(Boolean)
   );
-  const unmatchedImages = productImportState.images.filter((file) => !validKeys.has(productImageKey(file.name)));
+  const standaloneItems = images
+    .filter((file) => !excelImageKeys.has(productImageKey(file.name)))
+    .map((file) => {
+      const key = productImageKey(file.name);
+      const product = key ? existingImageMap.get(key) : null;
+      return {
+        numero: null,
+        referencia: product ? product.referencia : key,
+        refKey: product ? productReferenceKey(product.referencia) : key,
+        nombre: product ? product.nombre : "",
+        descripcion: product ? product.descripcion : null,
+        imageFile: file,
+        imageUrl: null,
+        existing: product || null,
+        errors: product ? [] : ["No hay ningún producto con esa referencia en la base de datos."],
+        warnings: [],
+        type: "image"
+      };
+    });
+
+  const allItems = items.concat(standaloneItems);
+  productImportState.items = allItems;
 
   const nuevos = items.filter((item) => item.type === "new" && !item.errors.length).length;
   const actualizan = items.filter((item) => item.type === "update" && !item.errors.length).length;
-  const conErrores = items.filter((item) => item.errors.length > 0).length;
-  const imagenes = items.filter((item) => item.imageFile && !item.errors.length).length;
+  const conErrores = allItems.filter((item) => item.errors.length > 0).length;
+  const imagenes = allItems.filter((item) => item.imageFile && !item.errors.length).length;
+  const sinProducto = standaloneItems.filter((item) => item.errors.length).length;
 
   if (summary) {
-    summary.textContent =
-      nuevos + " nuevos, " + actualizan + " se actualizan, " + conErrores + " con errores, " + imagenes + " imágenes";
+    if (!rows.length) {
+      summary.textContent =
+        images.length + " imagen(es), " + (standaloneItems.length - sinProducto) +
+        " con producto en la base, " + sinProducto + " sin producto";
+    } else {
+      summary.textContent =
+        nuevos + " nuevos, " + actualizan + " se actualizan, " + conErrores + " con errores, " + imagenes + " imágenes";
+    }
   }
 
   if (imageHint) {
     const notes = [];
-    if (unmatchedImages.length) {
-      notes.push(unmatchedImages.length + " imagen(es) no coinciden con ninguna referencia del Excel.");
+    if (sinProducto) {
+      notes.push(sinProducto + " imagen(es) no coinciden con ninguna referencia del Excel ni de la base de datos.");
     }
     if (productImportState.imageErrors.length) {
       notes.push(productImportState.imageErrors.join(" "));
@@ -2927,10 +3286,11 @@ function buildProductImportPreview() {
     imageHint.textContent = notes.join(" ");
   }
 
-  renderProductImportList(items, unmatchedImages, productImportState.imageErrors);
+  renderProductImportList(allItems, [], productImportState.imageErrors);
 
   if (confirmBtn) {
-    confirmBtn.disabled = productImportState.running || items.filter((item) => !item.errors.length).length === 0;
+    confirmBtn.textContent = rows.length ? "Importar productos" : "Aplicar imágenes";
+    confirmBtn.disabled = productImportState.running || !allItems.some((item) => !item.errors.length);
   }
 }
 
@@ -2946,37 +3306,48 @@ function renderProductImportList(items, unmatchedImages, imageErrors) {
   cont.textContent = "";
 
   items.forEach((item) => {
+    const errors = item.errors || [];
+    const warnings = item.warnings || [];
+    const isImage = item.type === "image";
+    const isUpdate = item.type === "update" || isImage;
+
     const card = document.createElement("div");
-    card.className =
-      "import-item " +
-      (item.errors.length ? "is-error" : item.type === "update" ? "is-update" : "is-new");
+    card.className = "import-item " + (errors.length ? "is-error" : isUpdate ? "is-update" : "is-new");
 
     const head = document.createElement("div");
     head.className = "import-item-head";
 
     const title = document.createElement("div");
     title.className = "import-item-title";
-    title.textContent = item.nombre || item.referencia || "Fila " + item.numero;
+    title.textContent = isImage
+      ? item.imageFile.name
+      : item.nombre || item.referencia || "Fila " + item.numero;
     head.appendChild(title);
 
     const badge = document.createElement("span");
-    badge.className = "import-badge " + (item.errors.length ? "error" : item.type === "update" ? "update" : "new");
-    badge.textContent = item.errors.length ? "Error" : item.type === "update" ? "Se actualiza" : "Nuevo";
+    badge.className = "import-badge " + (errors.length ? "error" : isUpdate ? "update" : "new");
+    badge.textContent = errors.length ? "Error" : isImage ? "Imagen" : isUpdate ? "Se actualiza" : "Nuevo";
     head.appendChild(badge);
     card.appendChild(head);
 
     const meta = document.createElement("div");
     meta.className = "import-item-meta";
-    const metaParts = [
-      "Ref. " + (item.referencia || "-"),
-      isFinite(item.precio) ? formatPrecio(item.precio) : "Precio inválido",
-      "Stock: " + (Number.isInteger(item.stock) ? item.stock : "-"),
-      "Categoría: " + (item.categoria || "-"),
-      "Proveedor: " + (item.proveedor || "-"),
-      "Tonos: " + item.tonos.length,
-      item.enOferta ? "Oferta: " + formatPrecio(item.precioOferta) : "Sin oferta",
-      item.imageFile ? "Imagen: " + item.imageFile.name : "Sin imagen"
-    ];
+    const metaParts = isImage
+      ? [
+          "Ref. " + (item.referencia || "-"),
+          item.nombre ? "Producto: " + item.nombre : "Producto: -",
+          "Archivo: " + item.imageFile.name
+        ]
+      : [
+          "Ref. " + (item.referencia || "-"),
+          isFinite(item.precio) ? formatPrecio(item.precio) : "Precio inválido",
+          "Stock: " + (Number.isInteger(item.stock) ? item.stock : "-"),
+          "Categoría: " + (item.categoria || "-"),
+          "Proveedor: " + (item.proveedor || "-"),
+          "Tonos: " + ((item.tonos || []).length),
+          item.enOferta ? "Oferta: " + formatPrecio(item.precioOferta) : "Sin oferta",
+          item.imageFile ? "Imagen: " + item.imageFile.name : "Sin imagen"
+        ];
     metaParts.forEach((text) => {
       const span = document.createElement("span");
       span.textContent = text;
@@ -2984,14 +3355,14 @@ function renderProductImportList(items, unmatchedImages, imageErrors) {
     });
     card.appendChild(meta);
 
-    item.warnings.forEach((warning) => {
+    warnings.forEach((warning) => {
       const p = document.createElement("p");
       p.className = "import-warning";
       p.textContent = warning;
       card.appendChild(p);
     });
 
-    item.errors.forEach((error) => {
+    errors.forEach((error) => {
       const p = document.createElement("p");
       p.className = "import-error";
       p.textContent = error;
@@ -3009,7 +3380,9 @@ function renderProductImportList(items, unmatchedImages, imageErrors) {
     head.className = "import-item-head";
     const title = document.createElement("div");
     title.className = "import-item-title";
-    title.textContent = "Imágenes sin producto coincidente";
+    title.textContent = unmatchedImages.length
+      ? "Imágenes sin producto coincidente"
+      : "Imágenes no cargadas";
     head.appendChild(title);
     card.appendChild(head);
 
@@ -3113,6 +3486,158 @@ function downloadProductTemplate() {
   }
 }
 
+function styleCatalogSheet(worksheet) {
+  const headerRow = worksheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEC4899" } };
+  headerRow.alignment = { vertical: "top", wrapText: true };
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  worksheet.eachRow((row) => {
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      cell.alignment = { vertical: "top", wrapText: true };
+    });
+  });
+}
+
+function exportSiNo(value) {
+  if (value === true || value === 1) return "SI";
+  if (typeof value === "string") return /^s[ií]$/i.test(value.trim()) ? "SI" : "NO";
+  return "NO";
+}
+
+function addSiNoValidation(worksheet, columnNumber) {
+  const end = Math.max(1000, worksheet.rowCount + 200);
+  const letter = worksheet.getColumn(columnNumber).letter;
+  worksheet.dataValidations.add(`${letter}2:${letter}${end}`, {
+    type: "list",
+    allowBlank: true,
+    formulae: ['"SI,NO"']
+  });
+}
+
+function showCurrentCatalogError(message) {
+  const report = document.getElementById("productImportReport");
+  if (!report) return;
+  report.className = "import-report is-error";
+  report.textContent = "";
+  report.appendChild(createEl("p", "import-report-title", "No se pudo generar el Excel actual."));
+  report.appendChild(createEl("p", null, message));
+}
+
+async function downloadCurrentCatalog() {
+  const btn = document.getElementById("downloadCurrentCatalogBtn");
+  const originalText = btn ? btn.textContent : "Descargar Excel actual";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Generando Excel...";
+  }
+
+  const report = document.getElementById("productImportReport");
+  if (report) {
+    report.className = "import-report";
+    report.textContent = "";
+  }
+
+  try {
+    if (typeof ExcelJS === "undefined") throw new Error("ExcelJS no está cargado.");
+
+    const [productos, videos] = await Promise.all([
+      fetchAllTableRows("productos", EXPORT_PRODUCTOS_SELECT, 1000),
+      fetchAllTableRows("videos_uso", VIDEO_SELECT, 1000, { column: "titulo", ascending: true })
+    ]);
+
+    const workbook = new ExcelJS.Workbook();
+    const productsSheet = workbook.addWorksheet("productos");
+    productsSheet.columns = PRODUCT_IMPORT_COLUMNS.map((header, index) => ({
+      header,
+      key: header,
+      width: EXPORT_PRODUCT_WIDTHS[index]
+    }));
+
+    productos.forEach((p) => {
+      const inventario = firstRel(p.inventario);
+      productsSheet.addRow({
+        referencia: p.referencia === null || p.referencia === undefined ? "" : String(p.referencia),
+        nombre: p.nombre === null || p.nombre === undefined ? "" : String(p.nombre),
+        descripcion: p.descripcion === null || p.descripcion === undefined ? "" : String(p.descripcion),
+        precio: p.precio === null || p.precio === undefined ? null : Number(p.precio),
+        categoria: p.categoria === null || p.categoria === undefined ? "" : String(p.categoria),
+        proveedor: productProviderName(firstRel(p.proveedores)),
+        tonos: Array.isArray(p.tonos)
+          ? p.tonos.join("; ")
+          : p.tonos === null || p.tonos === undefined ? "" : String(p.tonos),
+        stock:
+          inventario && inventario.cantidad_disponible !== null && inventario.cantidad_disponible !== undefined
+            ? Number(inventario.cantidad_disponible)
+            : 0,
+        en_oferta: exportSiNo(p.en_oferta),
+        precio_oferta:
+          p.precio_oferta === null || p.precio_oferta === undefined ? null : Number(p.precio_oferta),
+        precio_proveedor:
+          p.pedidos_clientes === null || p.pedidos_clientes === undefined ? null : Number(p.pedidos_clientes),
+        activo: exportSiNo(p.activo)
+      });
+    });
+
+    const videosSheet = workbook.addWorksheet("videos");
+    videosSheet.columns = [
+      { header: "titulo", key: "titulo", width: 34 },
+      { header: "descripcion", key: "descripcion", width: 52 },
+      { header: "archivo", key: "archivo", width: 28 },
+      { header: "activo", key: "activo", width: 12 }
+    ];
+    videos.forEach((v) => {
+      videosSheet.addRow({
+        titulo: v.titulo === null || v.titulo === undefined ? "" : String(v.titulo),
+        descripcion: v.descripcion === null || v.descripcion === undefined ? "" : String(v.descripcion),
+        archivo: v.archivo === null || v.archivo === undefined ? "" : String(v.archivo),
+        activo: exportSiNo(v.activo)
+      });
+    });
+
+    styleCatalogSheet(productsSheet);
+    styleCatalogSheet(videosSheet);
+
+    productsSheet.getColumn(1).eachCell({ includeEmpty: false }, (cell, rowNumber) => {
+      if (rowNumber > 1) cell.numFmt = "@";
+    });
+    [4, 10, 11].forEach((columnNumber) => {
+      productsSheet.getColumn(columnNumber).eachCell({ includeEmpty: false }, (cell, rowNumber) => {
+        if (rowNumber > 1 && cell.value !== null && cell.value !== undefined && cell.value !== "") {
+          cell.numFmt = EXPORT_PRICE_FORMAT;
+        }
+      });
+    });
+
+    addSiNoValidation(productsSheet, 9);
+    addSiNoValidation(productsSheet, 12);
+    addSiNoValidation(videosSheet, 4);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Catalogo_Aurea_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    if (btn) btn.textContent = "Listo";
+  } catch (error) {
+    const message = translateError(error, "No se pudo generar el Excel actual.");
+    showCurrentCatalogError(message);
+    showToast(message, "error", "Excel actual");
+    if (btn) btn.textContent = originalText;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function setProductImportProgress(current, total, text) {
   const wrap = document.getElementById("productImportProgressWrap");
   const bar = document.getElementById("productImportProgressBar");
@@ -3139,7 +3664,6 @@ function buildProductPayload(item, providerField, providerMap, existing) {
         : existing?.pedidos_clientes !== null && existing?.pedidos_clientes !== undefined
           ? existing.pedidos_clientes
           : null,
-    imagen_url: item.imageUrl || existing?.imagen_url || null,
     precio_oferta: item.enOferta ? Number(item.precioOferta) : null
   };
 
@@ -3185,6 +3709,80 @@ async function updateProductInventory(items, idMap) {
   }
 
   return failures;
+}
+
+async function updateProductImages(items, idMap) {
+  const sb = getSupabase();
+  const failures = [];
+
+  for (let index = 0; index < items.length; index += 5) {
+    const chunk = items.slice(index, index + 5);
+    await Promise.all(
+      chunk.map(async (item) => {
+        const id = idMap.get(item.refKey);
+        if (id === null || id === undefined) {
+          failures.push({
+            referencia: item.referencia,
+            archivo: item.imageFile ? item.imageFile.name : "",
+            message: "No se encontró el id del producto para actualizar la imagen."
+          });
+          return;
+        }
+
+        const { error, count } = await sb
+          .from("productos")
+          .update({ imagen_url: item.imageUrl }, { count: "exact" })
+          .eq("id_producto", id);
+
+        if (error) {
+          failures.push({
+            referencia: item.referencia,
+            archivo: item.imageFile ? item.imageFile.name : "",
+            message: translateError(error, "No se pudo actualizar la imagen del producto")
+          });
+        } else if (count !== null && count !== undefined && Number(count) === 0) {
+          failures.push({
+            referencia: item.referencia,
+            archivo: item.imageFile ? item.imageFile.name : "",
+            message: "No se encontró el producto para actualizar la imagen."
+          });
+        }
+      })
+    );
+  }
+
+  return failures;
+}
+
+async function verifyProductImageUrls(items, idMap) {
+  const expected = items.filter((item) => {
+    const id = idMap.get(item.refKey);
+    return item.imageUrl && id !== null && id !== undefined;
+  });
+  if (!expected.length) return { images: 0, mismatches: [] };
+
+  const rows = await fetchProductRowsByReferences(
+    expected.map((item) => item.referencia),
+    "referencia, imagen_url"
+  );
+  const rowMap = new Map();
+  rows.forEach((row) => {
+    const key = productReferenceKey(row.referencia);
+    if (key) rowMap.set(key, row);
+  });
+
+  let images = 0;
+  const mismatches = [];
+  expected.forEach((item) => {
+    const row = rowMap.get(item.refKey);
+    if (!row || String(row.imagen_url || "") !== String(item.imageUrl)) {
+      mismatches.push({ referencia: item.referencia, motivo: "Diferencias en: imagen_url." });
+    } else {
+      images++;
+    }
+  });
+
+  return { images, mismatches };
 }
 
 async function hideMissingProducts(excelReferences) {
@@ -3322,7 +3920,7 @@ function downloadProductImportReport() {
   URL.revokeObjectURL(url);
 }
 
-function showProductImportReport(success, total, productFailures, imageFailures, inventoryFailures, providerFailures, hideResult, verification, verificationError, generalError) {
+function showProductImportReport(success, total, productFailures, imageFailures, inventoryFailures, providerFailures, hideResult, verification, verificationError, generalError, imagesApplied) {
   const report = document.getElementById("productImportReport");
   if (!report) return;
   report.textContent = "";
@@ -3373,9 +3971,12 @@ function showProductImportReport(success, total, productFailures, imageFailures,
 
   const title = document.createElement("p");
   title.className = "import-report-title";
-  title.textContent =
-    "Se importaron " + success + " de " + total + " producto(s)" +
-    (failures.length ? ". Incidencias: " + failures.length + "." : " correctamente.");
+  const imageText = imagesApplied ? " y se aplicaron " + imagesApplied + " imagen(es)" : "";
+  title.textContent = total
+    ? "Se importaron " + success + " de " + total + " producto(s)" + imageText +
+      (failures.length ? ". Incidencias: " + failures.length + "." : " correctamente.")
+    : "Se aplicaron " + Number(imagesApplied || 0) + " imagen(es)" +
+      (failures.length ? ". Incidencias: " + failures.length + "." : " correctamente.");
   report.appendChild(title);
 
   if (hideResult) {
@@ -3440,12 +4041,16 @@ async function importProductsFromExcel() {
 
   const validItems = productImportState.items.filter((item) => !item.errors.length);
   if (!validItems.length) {
-    showToast("No hay productos válidos para importar.", "error", "Importación");
+    showToast("No hay productos ni imágenes válidos para importar.", "error", "Importación");
     return;
   }
 
+  const productItems = validItems.filter((item) => item.type !== "image");
+  const imageItems = validItems.filter((item) => item.imageFile);
+  const standaloneImageItems = imageItems.filter((item) => item.type === "image");
+
   const hideInput = document.getElementById("productHideMissing");
-  let hideMissing = !!(hideInput && hideInput.checked);
+  let hideMissing = !!(hideInput && hideInput.checked) && productItems.length > 0;
   const excelReferences = productImportState.excelRows.map((row) => row.referencia);
 
   if (hideMissing) {
@@ -3487,13 +4092,13 @@ async function importProductsFromExcel() {
     report.textContent = "";
   }
 
-  const imageItems = validItems.filter((item) => item.imageFile);
-  const totalSteps = validItems.length + imageItems.length;
+  let totalSteps = productItems.length + imageItems.length;
   let completedSteps = 0;
+  let imagesApplied = 0;
   const productFailures = [];
   const imageFailures = [];
   const providerFailures = [];
-  let inventoryFailures = [];
+  const inventoryFailures = [];
   let hideResult = null;
   let verification = null;
   let verificationError = "";
@@ -3503,17 +4108,18 @@ async function importProductsFromExcel() {
 
   try {
     const sb = getSupabase();
-    const providerResult = await ensureProductProviders(validItems.map((item) => item.proveedor));
+    const providerResult = productItems.length
+      ? await ensureProductProviders(productItems.map((item) => item.proveedor))
+      : { map: new Map(), errors: [] };
     providerResult.errors.forEach((message) => providerFailures.push(message));
 
-    const providerField = validItems.some((item) => item.proveedor)
+    const providerField = productItems.some((item) => item.proveedor)
       ? await getProductProviderField(sb)
       : "id_proveedor";
 
-    const existingRows = await fetchProductRowsByReferences(
-      validItems.map((item) => item.referencia),
-      "*"
-    );
+    const existingRows = productItems.length
+      ? await fetchProductRowsByReferences(productItems.map((item) => item.referencia), "*")
+      : [];
     const existingMap = new Map();
     existingRows.forEach((row) => {
       const key = productReferenceKey(row.referencia);
@@ -3521,7 +4127,7 @@ async function importProductsFromExcel() {
     });
 
     const importable = [];
-    validItems.forEach((item) => {
+    productItems.forEach((item) => {
       if (item.proveedor && !providerResult.map.has(productReferenceKey(item.proveedor))) {
         productFailures.push({
           referencia: item.referencia,
@@ -3531,6 +4137,9 @@ async function importProductsFromExcel() {
       }
       importable.push(item);
     });
+
+    totalSteps = importable.length + imageItems.length;
+    setProductImportProgress(0, totalSteps, "Preparando importación...");
 
     let imagesDone = 0;
     for (let index = 0; index < imageItems.length; index += 3) {
@@ -3603,8 +4212,24 @@ async function importProductsFromExcel() {
       );
     }
 
-    const importedItems = validItems.filter((item) => idMap.has(item.refKey));
-    inventoryFailures = await updateProductInventory(importedItems, idMap);
+    const importedItems = importable.filter((item) => idMap.has(item.refKey));
+    inventoryFailures.push.apply(inventoryFailures, await updateProductInventory(importedItems, idMap));
+
+    if (imageItems.length) {
+      const imageRows = await fetchProductRowsByReferences(
+        imageItems.map((item) => item.referencia),
+        "id_producto, referencia"
+      );
+      imageRows.forEach((row) => {
+        const key = productReferenceKey(row.referencia);
+        if (key) idMap.set(key, row.id_producto);
+      });
+    }
+
+    const appliedImages = imageItems.filter((item) => item.imageUrl && idMap.has(item.refKey));
+    const imageUpdateFailures = await updateProductImages(appliedImages, idMap);
+    imageUpdateFailures.forEach((failure) => imageFailures.push(failure));
+    imagesApplied = appliedImages.length - imageUpdateFailures.length;
 
     if (hideMissing) {
       const result = await hideMissingProducts(excelReferences);
@@ -3612,9 +4237,17 @@ async function importProductsFromExcel() {
     }
 
     try {
-      verification = await verifyProductImport(validItems, idMap);
+      verification = productItems.length
+        ? await verifyProductImport(importable, idMap)
+        : { products: 0, stock: 0, images: 0, mismatches: [] };
     } catch (error) {
       verificationError = translateError(error, "No se pudo verificar la importación");
+    }
+
+    if (verification && standaloneImageItems.length) {
+      const imageVerification = await verifyProductImageUrls(standaloneImageItems, idMap);
+      verification.images += imageVerification.images;
+      verification.mismatches.push.apply(verification.mismatches, imageVerification.mismatches);
     }
 
     try {
@@ -3623,10 +4256,10 @@ async function importProductsFromExcel() {
       /* el informe se muestra igual */
     }
 
-    buildProductImportPreview();
+    await buildProductImportPreview();
     showProductImportReport(
       importedItems.length,
-      validItems.length,
+      productItems.length,
       productFailures,
       imageFailures,
       inventoryFailures,
@@ -3634,7 +4267,8 @@ async function importProductsFromExcel() {
       hideResult,
       verification,
       verificationError,
-      ""
+      "",
+      imagesApplied
     );
 
     const hasValidationErrors = productImportState.items.some((item) => item.errors.length);
@@ -3642,11 +4276,28 @@ async function importProductsFromExcel() {
     if (productFailures.length || imageFailures.length || inventoryFailures.length || providerFailures.length || hasValidationErrors || hasHideErrors || (verification && verification.mismatches.length) || verificationError) {
       showToast("Importación terminada con incidencias. Revisa el informe.", "error", "Importar productos");
     } else {
-      showToast("Productos importados y verificados correctamente.", "success");
+      showToast(
+        productItems.length
+          ? "Productos importados y verificados correctamente."
+          : "Imágenes aplicadas y verificadas correctamente.",
+        "success"
+      );
     }
   } catch (error) {
     const message = translateError(error, "No se pudo completar la importación");
-    showProductImportReport(idMap.size, validItems.length, productFailures, imageFailures, inventoryFailures, providerFailures, hideResult, verification, verificationError, message);
+    showProductImportReport(
+      idMap.size,
+      productItems.length,
+      productFailures,
+      imageFailures,
+      inventoryFailures,
+      providerFailures,
+      hideResult,
+      verification,
+      verificationError,
+      message,
+      imagesApplied
+    );
     showToast(message, "error", "Importar productos");
   } finally {
     productImportState.running = false;
@@ -3699,7 +4350,10 @@ function resetProductImport() {
   if (progressText) progressText.textContent = "";
 
   const confirmBtn = document.getElementById("productImportConfirmBtn");
-  if (confirmBtn) confirmBtn.disabled = true;
+  if (confirmBtn) {
+    confirmBtn.textContent = "Importar productos";
+    confirmBtn.disabled = true;
+  }
   const clearBtn = document.getElementById("productImportClearBtn");
   if (clearBtn) clearBtn.disabled = false;
   const hideInput = document.getElementById("productHideMissing");
@@ -3709,6 +4363,9 @@ function resetProductImport() {
 function bindProductEvents() {
   const templateBtn = document.getElementById("downloadProductTemplateBtn");
   if (templateBtn) templateBtn.addEventListener("click", downloadProductTemplate);
+
+  const currentCatalogBtn = document.getElementById("downloadCurrentCatalogBtn");
+  if (currentCatalogBtn) currentCatalogBtn.addEventListener("click", downloadCurrentCatalog);
 
   const excelInput = document.getElementById("productExcelInput");
   if (excelInput) {
@@ -3813,7 +4470,7 @@ async function loadOrders() {
   showBox("ordErrorBox", false);
   showBox("ordEmptyBox", false);
   showBox("ordTableWrap", false);
-  document.getElementById("ordMobileCards").innerHTML = "";
+  document.getElementById("ordMobileCards").textContent = "";
 
   try {
     const sb = getSupabase();
@@ -3871,7 +4528,7 @@ function renderOrders() {
   if (!hasData) {
     showBox("ordErrorBox", false);
     showBox("ordTableWrap", false);
-    document.getElementById("ordMobileCards").innerHTML = "";
+    document.getElementById("ordMobileCards").textContent = "";
     showBox("ordEmptyBox", true);
     document.getElementById("ordEmptyTitle").textContent = "Todavía no hay pedidos";
     document.getElementById("ordEmptyMessage").textContent =
@@ -3882,7 +4539,7 @@ function renderOrders() {
   if (!hasResults) {
     showBox("ordErrorBox", false);
     showBox("ordTableWrap", false);
-    document.getElementById("ordMobileCards").innerHTML = "";
+    document.getElementById("ordMobileCards").textContent = "";
     showBox("ordEmptyBox", true);
     document.getElementById("ordEmptyTitle").textContent = "Sin resultados";
     document.getElementById("ordEmptyMessage").textContent =
@@ -3899,16 +4556,18 @@ function renderOrderChips() {
   const cont = document.getElementById("orderChips");
   if (!cont) return;
 
-  cont.innerHTML = ORDEN_ESTADOS.map((opt) => {
+  cont.textContent = "";
+  ORDEN_ESTADOS.forEach((opt) => {
     const n = opt.value === "todos"
       ? state.orders.length
       : state.orders.filter((p) => p.estado === opt.value).length;
-    return (
-      '<button class="chip' + (state.orderFilter === opt.value ? " active" : "") +
-      '" type="button" data-order-filter="' + opt.value + '">' +
-      escapeHtml(opt.label) + '<span class="chip-n">' + n + "</span></button>"
-    );
-  }).join("");
+    const btn = createEl("button", "chip" + (state.orderFilter === opt.value ? " active" : ""));
+    btn.type = "button";
+    btn.setAttribute("data-order-filter", opt.value);
+    btn.appendChild(document.createTextNode(opt.label));
+    btn.appendChild(createEl("span", "chip-n", n));
+    cont.appendChild(btn);
+  });
 }
 
 function updateOrderStats() {
@@ -3926,111 +4585,164 @@ function entregaClass(pedido) {
   return isRecoge(pedido) ? "entrega-recoge" : "entrega-domicilio";
 }
 
-function pagoHtml(pedido) {
-  const pago = getPago(pedido);
-  if (!pago) return '<span class="envio-vacio">Sin registro</span>';
-  const metodo = escapeHtml(pago.metodo || "-");
-  const estado = escapeHtml(pago.estado || "pendiente");
-  return (
-    metodo + " <span class=\"badge-estado pago-" + estado + "\">" + estado.replace(/_/g, " ") + "</span>"
-  );
+function estadoClass(value) {
+  return String(value || "").replace(/[^a-z0-9_-]/gi, "");
 }
 
-function envioInfoHtml(pedido) {
+function pagoNode(pedido) {
+  const pago = getPago(pedido);
+  if (!pago) return createEl("span", "envio-vacio", "Sin registro");
+
+  const frag = document.createDocumentFragment();
+  frag.appendChild(document.createTextNode(pago.metodo || "-"));
+  frag.appendChild(document.createTextNode(" "));
+  const estado = String(pago.estado || "pendiente");
+  frag.appendChild(createEl("span", "badge-estado pago-" + estadoClass(estado), estado.replace(/_/g, " ")));
+  return frag;
+}
+
+function envioInfoNode(pedido) {
   if (isRecoge(pedido)) {
-    return '<span class="entrega-tag recoge">Recoge en tienda</span>';
+    return createEl("span", "entrega-tag recoge", "Recoge en tienda");
   }
   const envio = getEnvio(pedido);
-  if (!envio) return '<span class="envio-vacio">Sin envío registrado</span>';
-  return (
-    '<div class="entrega-tag domicilio">Domicilio</div>' +
-    "<div>" + escapeHtml(envio.direccion || "Sin dirección") + "</div>"
-  );
+  if (!envio) return createEl("span", "envio-vacio", "Sin envío registrado");
+
+  const frag = document.createDocumentFragment();
+  frag.appendChild(createEl("div", "entrega-tag domicilio", "Domicilio"));
+  frag.appendChild(createEl("div", null, envio.direccion || "Sin dirección"));
+  return frag;
 }
 
-function envioSelectHtml(pedido) {
-  if (isRecoge(pedido)) return '<span class="envio-vacio">No aplica</span>';
+function envioSelectNode(pedido) {
+  if (isRecoge(pedido)) return createEl("span", "envio-vacio", "No aplica");
   const envio = getEnvio(pedido);
   const actual = envio && envio.estado ? envio.estado : "preparando";
-  return (
-    '<select class="envio-select" data-action="envio" data-id="' + pedido.id_pedido + '">' +
-    ESTADOS_ENVIO.map(
-      (e) =>
-        '<option value="' + e.value + '"' +
-        (e.value === actual ? " selected" : "") + ">" + e.label + "</option>"
-    ).join("") +
-    "</select>"
-  );
+
+  const select = createEl("select", "envio-select");
+  select.setAttribute("data-action", "envio");
+  select.setAttribute("data-id", String(pedido.id_pedido));
+  ESTADOS_ENVIO.forEach((e) => {
+    const option = createEl("option", null, e.label);
+    option.value = e.value;
+    if (e.value === actual) option.selected = true;
+    select.appendChild(option);
+  });
+  return select;
 }
 
 function renderOrdersTable(list) {
-  document.getElementById("ordTableBody").innerHTML = list
-    .map((p) => {
-      const cliente = getCliente(p);
-      return (
-        '<tr class="' + entregaClass(p) + '">' +
-        '<td class="cell-ref">' + escapeHtml(p.referencia || p.id_pedido) + "</td>" +
-        "<td><strong>" + escapeHtml((cliente && cliente.nombre) || "Sin cliente") + "</strong><br>" +
-          '<small style="color:#6B7280;">ID: ' + escapeHtml((cliente && cliente.identificacion) || "-") +
-          "<br>Tel: " + escapeHtml((cliente && cliente.telefono) || "-") + "</small>" +
-          (p.notas ? '<br><small style="color:#6B7280;">📝 ' + escapeHtml(p.notas) + "</small>" : "") +
-          "</td>" +
-        '<td style="white-space:nowrap;">' + formatFecha(p.fecha) + "</td>" +
-        '<td class="cell-price">' + formatPrecio(p.total) + "</td>" +
-        "<td>" + pagoHtml(p) + "</td>" +
-        '<td><span class="badge-estado ' + escapeHtml(p.estado || "") + '">' +
-          escapeHtml(estadoPedidoLabel(p.estado)) + "</span></td>" +
-        "<td>" + envioInfoHtml(p) + "</td>" +
-        '<td class="cell-actions">' + envioSelectHtml(p) +
-          '<button class="btn-row-action" type="button" data-action="detail" data-id="' + p.id_pedido + '">Detalle</button>' +
-        "</td>" +
-        "</tr>"
-      );
-    })
-    .join("");
+  const tbody = document.getElementById("ordTableBody");
+  tbody.textContent = "";
+
+  list.forEach((p) => {
+    const cliente = getCliente(p);
+    const tr = createEl("tr", entregaClass(p));
+
+    tr.appendChild(createEl("td", "cell-ref", p.referencia || p.id_pedido));
+
+    const tdCliente = createEl("td");
+    tdCliente.appendChild(createEl("strong", null, (cliente && cliente.nombre) || "Sin cliente"));
+    tdCliente.appendChild(document.createElement("br"));
+
+    const smallId = createEl("small", null, "ID: " + ((cliente && cliente.identificacion) || "-"));
+    smallId.style.color = "#6B7280";
+    tdCliente.appendChild(smallId);
+    tdCliente.appendChild(document.createElement("br"));
+
+    const smallTel = createEl("small", null, "Tel: " + ((cliente && cliente.telefono) || "-"));
+    smallTel.style.color = "#6B7280";
+    tdCliente.appendChild(smallTel);
+
+    if (p.notas) {
+      tdCliente.appendChild(document.createElement("br"));
+      const smallNotas = createEl("small", null, "📝 " + p.notas);
+      smallNotas.style.color = "#6B7280";
+      tdCliente.appendChild(smallNotas);
+    }
+    tr.appendChild(tdCliente);
+
+    const tdFecha = createEl("td", null, formatFecha(p.fecha));
+    tdFecha.style.whiteSpace = "nowrap";
+    tr.appendChild(tdFecha);
+
+    tr.appendChild(createEl("td", "cell-price", formatPrecio(p.total)));
+
+    const tdPago = createEl("td");
+    tdPago.appendChild(pagoNode(p));
+    tr.appendChild(tdPago);
+
+    const tdEstado = createEl("td");
+    tdEstado.appendChild(createEl("span", "badge-estado " + estadoClass(p.estado), estadoPedidoLabel(p.estado)));
+    tr.appendChild(tdEstado);
+
+    const tdEnvio = createEl("td");
+    tdEnvio.appendChild(envioInfoNode(p));
+    tr.appendChild(tdEnvio);
+
+    const tdAcciones = createEl("td", "cell-actions");
+    tdAcciones.appendChild(envioSelectNode(p));
+    tdAcciones.appendChild(actionButton("detail", p.id_pedido, "Detalle"));
+    tr.appendChild(tdAcciones);
+
+    tbody.appendChild(tr);
+  });
 
   showBox("ordTableWrap", true);
 }
 
 function renderOrdersMobile(list) {
-  document.getElementById("ordMobileCards").innerHTML = list
-    .map((p) => {
-      const cliente = getCliente(p);
-      const envio = getEnvio(p);
-      return (
-        '<div class="ord-card ' + entregaClass(p) + '">' +
-          '<div class="ord-card-head">' +
-            "<div>" +
-              '<div class="entrega-tag ' + (isRecoge(p) ? "recoge" : "domicilio") + '">' +
-                (isRecoge(p) ? "Recoge" : "Domicilio") + "</div>" +
-              '<div class="ord-card-cliente">' + escapeHtml((cliente && cliente.nombre) || "Sin cliente") + "</div>" +
-              '<div class="ord-card-ref">Ref. ' + escapeHtml(p.referencia || p.id_pedido) + "</div>" +
-            "</div>" +
-            '<div style="text-align:right;">' +
-              '<div class="ord-card-total">' + formatPrecio(p.total) + "</div>" +
-              '<span class="badge-estado ' + escapeHtml(p.estado || "") + '">' +
-                escapeHtml(estadoPedidoLabel(p.estado)) + "</span>" +
-            "</div>" +
-          "</div>" +
-          '<div class="ord-card-meta">' +
-            "<span>" + escapeHtml((cliente && cliente.identificacion) || "-") + "</span>" +
-            "<span>" + escapeHtml((cliente && cliente.telefono) || "-") + "</span>" +
-            "<span>" + formatFecha(p.fecha) + "</span>" +
-            "<span>" + pagoHtml(p) + "</span>" +
-          "</div>" +
-          '<div class="ord-card-envio">' +
-            (isRecoge(p)
-              ? "Recoge en tienda"
-              : "📍 " + escapeHtml((envio && envio.direccion) || "Sin dirección")) +
-          "</div>" +
-          (p.notas ? '<div class="ord-card-notas">📝 ' + escapeHtml(p.notas) + "</div>" : "") +
-          '<div class="ord-card-actions">' + envioSelectHtml(p) +
-            '<button class="btn-row-action" type="button" data-action="detail" data-id="' + p.id_pedido + '">Ver detalle</button>' +
-          "</div>" +
-        "</div>"
-      );
-    })
-    .join("");
+  const cont = document.getElementById("ordMobileCards");
+  cont.textContent = "";
+
+  list.forEach((p) => {
+    const cliente = getCliente(p);
+    const envio = getEnvio(p);
+    const card = createEl("div", "ord-card " + entregaClass(p));
+
+    const head = createEl("div", "ord-card-head");
+    const headLeft = createEl("div");
+    headLeft.appendChild(
+      createEl("div", "entrega-tag " + (isRecoge(p) ? "recoge" : "domicilio"), isRecoge(p) ? "Recoge" : "Domicilio")
+    );
+    headLeft.appendChild(createEl("div", "ord-card-cliente", (cliente && cliente.nombre) || "Sin cliente"));
+    headLeft.appendChild(createEl("div", "ord-card-ref", "Ref. " + (p.referencia || p.id_pedido)));
+    head.appendChild(headLeft);
+
+    const headRight = createEl("div");
+    headRight.style.textAlign = "right";
+    headRight.appendChild(createEl("div", "ord-card-total", formatPrecio(p.total)));
+    headRight.appendChild(createEl("span", "badge-estado " + estadoClass(p.estado), estadoPedidoLabel(p.estado)));
+    head.appendChild(headRight);
+    card.appendChild(head);
+
+    const meta = createEl("div", "ord-card-meta");
+    meta.appendChild(createEl("span", null, (cliente && cliente.identificacion) || "-"));
+    meta.appendChild(createEl("span", null, (cliente && cliente.telefono) || "-"));
+    meta.appendChild(createEl("span", null, formatFecha(p.fecha)));
+
+    const pagoSpan = createEl("span");
+    pagoSpan.appendChild(pagoNode(p));
+    meta.appendChild(pagoSpan);
+    card.appendChild(meta);
+
+    card.appendChild(
+      createEl(
+        "div",
+        "ord-card-envio",
+        isRecoge(p) ? "Recoge en tienda" : "📍 " + ((envio && envio.direccion) || "Sin dirección")
+      )
+    );
+
+    if (p.notas) card.appendChild(createEl("div", "ord-card-notas", "📝 " + p.notas));
+
+    const actions = createEl("div", "ord-card-actions");
+    actions.appendChild(envioSelectNode(p));
+    actions.appendChild(actionButton("detail", p.id_pedido, "Ver detalle"));
+    card.appendChild(actions);
+
+    cont.appendChild(card);
+  });
 }
 
 /* =========================================================
@@ -4124,6 +4836,30 @@ function subscribeRealtime() {
    PEDIDOS - detalle
    ========================================================= */
 
+function buildOrderDetailHead(pedido, cliente, envio, pago) {
+  const head = createEl("div", "ord-detail-head");
+  const add = (label, value) => {
+    const item = createEl("div");
+    item.appendChild(createEl("div", "od-label", label));
+    item.appendChild(createEl("div", "od-value", value));
+    head.appendChild(item);
+  };
+
+  add("Cliente", (cliente && cliente.nombre) || "-");
+  add("Identificación", (cliente && cliente.identificacion) || "-");
+  add("Teléfono", (cliente && cliente.telefono) || "-");
+  add("Tipo de entrega", isRecoge(pedido) ? "Recoge en tienda" : "Domicilio");
+  add("Estado del pedido", estadoPedidoLabel(pedido.estado));
+  add("Pago", ((pago && pago.metodo) || "Sin registro") + " - " + ((pago && pago.estado) || "-"));
+  add(
+    "Dirección",
+    isRecoge(pedido) ? "Recoge en tienda" : (envio && envio.direccion) || "Sin dirección"
+  );
+  add("Notas", pedido.notas || "Ninguna");
+
+  return head;
+}
+
 async function openOrderDetail(idPedido) {
   state.openOrderId = idPedido;
   const pedido = state.orders.find((p) => String(p.id_pedido) === String(idPedido));
@@ -4142,34 +4878,15 @@ async function openOrderDetail(idPedido) {
   errBox.classList.remove("visible");
   errBox.textContent = "";
 
-  document.getElementById("ordModalBody").innerHTML =
-    '<div class="ord-loading"><span class="spinner"></span> Cargando productos del pedido...</div>';
+  const body = document.getElementById("ordModalBody");
+  body.textContent = "";
+  const loading = createEl("div", "ord-loading");
+  loading.appendChild(createEl("span", "spinner"));
+  loading.appendChild(document.createTextNode(" Cargando productos del pedido..."));
+  body.appendChild(loading);
   document.getElementById("orderModal").classList.add("active");
 
-  const head =
-    '<div class="ord-detail-head">' +
-      '<div><div class="od-label">Cliente</div><div class="od-value">' +
-        escapeHtml((cliente && cliente.nombre) || "-") + "</div></div>" +
-      '<div><div class="od-label">Identificación</div><div class="od-value">' +
-        escapeHtml((cliente && cliente.identificacion) || "-") + "</div></div>" +
-      '<div><div class="od-label">Teléfono</div><div class="od-value">' +
-        escapeHtml((cliente && cliente.telefono) || "-") + "</div></div>" +
-      '<div><div class="od-label">Tipo de entrega</div><div class="od-value">' +
-        (isRecoge(pedido) ? "Recoge en tienda" : "Domicilio") + "</div></div>" +
-      '<div><div class="od-label">Estado del pedido</div><div class="od-value">' +
-        escapeHtml(estadoPedidoLabel(pedido.estado)) + "</div></div>" +
-      '<div><div class="od-label">Pago</div><div class="od-value">' +
-        escapeHtml((pago && pago.metodo) || "Sin registro") + " - " +
-        escapeHtml((pago && pago.estado) || "-") + "</div></div>" +
-      '<div><div class="od-label">Dirección</div><div class="od-value">' +
-        (isRecoge(pedido)
-          ? "Recoge en tienda"
-          : escapeHtml((envio && envio.direccion) || "Sin dirección")) + "</div></div>" +
-      '<div><div class="od-label">Notas</div><div class="od-value">' +
-        escapeHtml(pedido.notas || "Ninguna") + "</div></div>" +
-    "</div>";
-
-  const body = document.getElementById("ordModalBody");
+  const head = buildOrderDetailHead(pedido, cliente, envio, pago);
 
   try {
     let lineas = state.orderDetails[idPedido];
@@ -4187,34 +4904,60 @@ async function openOrderDetail(idPedido) {
 
     if (state.openOrderId !== idPedido) return;
 
+    body.textContent = "";
+    body.appendChild(head);
+
     if (!lineas.length) {
-      body.innerHTML = head + '<p class="envio-vacio">Este pedido no tiene productos registrados.</p>';
+      body.appendChild(createEl("p", "envio-vacio", "Este pedido no tiene productos registrados."));
       return;
     }
 
-    const rows = lineas
-      .map((d) => {
-        const prod = firstRel(d.productos);
-        const nombre = (prod && prod.nombre) || "Producto eliminado";
-        const ref = (prod && prod.referencia) || "";
-        const cantidad = Number(d.cantidad || 0);
-        const precio = Number(d.precio || 0);
-        const subtotal = d.subtotal !== null && d.subtotal !== undefined
-          ? Number(d.subtotal)
-          : cantidad * precio;
-        return (
-          "<tr>" +
-            "<td><strong>" + escapeHtml(nombre) + "</strong>" +
-              (ref ? '<br><small style="color:#6B7280;">Ref. ' + escapeHtml(ref) + "</small>" : "") +
-              (d.tono ? '<br><small style="color:#6B7280;">Tono: ' + escapeHtml(d.tono) + "</small>" : "") +
-            "</td>" +
-            '<td class="num">' + cantidad + "</td>" +
-            '<td class="num">' + formatPrecio(precio) + "</td>" +
-            '<td class="num">' + formatPrecio(subtotal) + "</td>" +
-          "</tr>"
-        );
-      })
-      .join("");
+    const wrapper = createEl("div", "order-table-wrapper");
+    const table = createEl("table", "ord-lines");
+
+    const thead = createEl("thead");
+    const headRow = createEl("tr");
+    ["Producto", "Cant.", "Precio", "Subtotal"].forEach((label, index) => {
+      const th = createEl("th", null, label);
+      if (index > 0) th.style.textAlign = "right";
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = createEl("tbody");
+    lineas.forEach((d) => {
+      const prod = firstRel(d.productos);
+      const nombre = (prod && prod.nombre) || "Producto eliminado";
+      const ref = (prod && prod.referencia) || "";
+      const cantidad = Number(d.cantidad || 0);
+      const precio = Number(d.precio || 0);
+      const subtotal = d.subtotal !== null && d.subtotal !== undefined
+        ? Number(d.subtotal)
+        : cantidad * precio;
+
+      const tr = createEl("tr");
+      const tdProducto = createEl("td");
+      tdProducto.appendChild(createEl("strong", null, nombre));
+
+      if (ref) {
+        const small = createEl("small", null, "Ref. " + ref);
+        small.style.color = "#6B7280";
+        tdProducto.appendChild(document.createElement("br"));
+        tdProducto.appendChild(small);
+      }
+      if (d.tono) {
+        const small = createEl("small", null, "Tono: " + d.tono);
+        small.style.color = "#6B7280";
+        tdProducto.appendChild(document.createElement("br"));
+        tdProducto.appendChild(small);
+      }
+      tr.appendChild(tdProducto);
+      tr.appendChild(createEl("td", "num", cantidad));
+      tr.appendChild(createEl("td", "num", formatPrecio(precio)));
+      tr.appendChild(createEl("td", "num", formatPrecio(subtotal)));
+      tbody.appendChild(tr);
+    });
 
     const suma = lineas.reduce((acc, d) => {
       const cantidad = Number(d.cantidad || 0);
@@ -4225,30 +4968,48 @@ async function openOrderDetail(idPedido) {
       return acc + subtotal;
     }, 0);
 
-    let pagoActions = "";
-    if (pedido.estado === "pendiente_pago") {
-      pagoActions =
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">' +
-          '<button class="btn btn-primary btn-sm" type="button" data-pago-action="confirmar" data-id="' + pedido.id_pedido + '">Confirmar pago</button>' +
-          '<button class="btn btn-secondary btn-sm" type="button" data-pago-action="liberar" data-id="' + pedido.id_pedido + '">Cancelar / Liberar reserva</button>' +
-        '</div>';
-    }
+    const totalRow = createEl("tr", "tot-row");
+    totalRow.appendChild(createEl("td", null, "Total"));
+    totalRow.appendChild(createEl("td"));
+    totalRow.appendChild(createEl("td"));
+    totalRow.appendChild(createEl("td", "num", formatPrecio(suma)));
+    tbody.appendChild(totalRow);
 
-    body.innerHTML =
-      head +
-      '<div class="order-table-wrapper"><table class="ord-lines">' +
-        "<thead><tr><th>Producto</th><th style='text-align:right;'>Cant.</th>" +
-        "<th style='text-align:right;'>Precio</th><th style='text-align:right;'>Subtotal</th></tr></thead>" +
-        "<tbody>" + rows +
-        '<tr class="tot-row"><td>Total</td><td></td><td></td><td class="num">' +
-          formatPrecio(suma) + "</td></tr>" +
-        "</tbody></table></div>" +
-      '<p style="font-size:.78rem;color:#6B7280;margin-top:10px;">Total registrado en pedidos: ' +
-        formatPrecio(pedido.total) + "</p>" +
-      pagoActions;
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    body.appendChild(wrapper);
+
+    const totalNote = createEl("p", null, "Total registrado en pedidos: " + formatPrecio(pedido.total));
+    totalNote.style.fontSize = ".78rem";
+    totalNote.style.color = "#6B7280";
+    totalNote.style.marginTop = "10px";
+    body.appendChild(totalNote);
+
+    if (pedido.estado === "pendiente_pago") {
+      const actions = createEl("div");
+      actions.style.display = "flex";
+      actions.style.gap = "10px";
+      actions.style.flexWrap = "wrap";
+      actions.style.marginTop = "14px";
+
+      const confirmar = createEl("button", "btn btn-primary btn-sm", "Confirmar pago");
+      confirmar.type = "button";
+      confirmar.setAttribute("data-pago-action", "confirmar");
+      confirmar.setAttribute("data-id", String(pedido.id_pedido));
+
+      const liberar = createEl("button", "btn btn-secondary btn-sm", "Cancelar / Liberar reserva");
+      liberar.type = "button";
+      liberar.setAttribute("data-pago-action", "liberar");
+      liberar.setAttribute("data-id", String(pedido.id_pedido));
+
+      actions.appendChild(confirmar);
+      actions.appendChild(liberar);
+      body.appendChild(actions);
+    }
   } catch (error) {
     if (state.openOrderId !== idPedido) return;
-    body.innerHTML = head;
+    body.textContent = "";
+    body.appendChild(head);
     const msg = translateError(error, "No se pudo cargar el detalle del pedido");
     errBox.textContent = msg;
     errBox.classList.add("visible");
@@ -4318,7 +5079,7 @@ async function loadProveedor() {
   showProvBox("provErrorBox", false);
   showProvBox("provEmptyBox", false);
   showProvBox("provTableWrap", false);
-  document.getElementById("provLotes").innerHTML = "";
+  document.getElementById("provLotes").textContent = "";
 
   const estado = document.getElementById("provEstado")?.value || "pagado";
   const desde = document.getElementById("provDesde")?.value;
@@ -4401,32 +5162,172 @@ function groupItems(items) {
 function renderLotes(lotes, desde, hasta) {
   showProvBox("provLoadingBox", false);
   const cont = document.getElementById("provLotes");
-  if (!lotes.some(l => l.items && l.items.length)) {
+  cont.textContent = "";
+
+  if (!lotes.some((l) => l.items && l.items.length)) {
     showProvBox("provEmptyBox", true);
     return;
   }
-  let html = "";
-  for (let idx=0; idx<lotes.length; idx++) {
-    const lote = lotes[idx];
+  showProvBox("provEmptyBox", false);
+
+  const headerCell = (label, align) => {
+    const th = createEl("th", null, label);
+    if (align) th.style.textAlign = align;
+    return th;
+  };
+
+  lotes.forEach((lote) => {
     const { list, sinValor } = groupItems(lote.items);
-    if (!list.length) continue;
+    if (!list.length) return;
+
+    const header = applyStyles(createEl("div"), {
+      background: "#F9A8D4",
+      padding: "10px 14px",
+      borderRadius: "8px",
+      margin: "10px 0",
+      fontWeight: "700",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "8px"
+    });
+    header.appendChild(
+      createEl(
+        "div",
+        null,
+        lote.type === "actual" ? "Pedido actual" : "Pedido enviado: " + fmtFechaCO(lote.corte.fecha_corte)
+      )
+    );
+
+    const controls = applyStyles(createEl("div"), {
+      display: "flex",
+      gap: "8px",
+      alignItems: "center",
+      flexWrap: "wrap"
+    });
+
     if (lote.type === "actual") {
-      html += "<div style='background:#F9A8D4;padding:10px 14px;border-radius:8px;margin:10px 0;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;'><div>Pedido actual</div><div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><input type='date' id='corteFecha' value='"+new Date().toISOString().slice(0,10)+"'><input type='text' id='corteNota' placeholder='Nota opcional'><button class='btn btn-primary btn-sm' data-marcar='actual'>Marcar como enviado</button><button class='btn btn-secondary btn-sm' data-excel='actual'>Descargar Excel</button></div></div>";
+      const fecha = document.createElement("input");
+      fecha.type = "date";
+      fecha.id = "corteFecha";
+      fecha.value = new Date().toISOString().slice(0, 10);
+
+      const nota = document.createElement("input");
+      nota.type = "text";
+      nota.id = "corteNota";
+      nota.placeholder = "Nota opcional";
+
+      const marcar = createEl("button", "btn btn-primary btn-sm", "Marcar como enviado");
+      marcar.type = "button";
+      marcar.setAttribute("data-marcar", "actual");
+
+      const excel = createEl("button", "btn btn-secondary btn-sm", "Descargar Excel");
+      excel.type = "button";
+      excel.setAttribute("data-excel", "actual");
+
+      controls.appendChild(fecha);
+      controls.appendChild(nota);
+      controls.appendChild(marcar);
+      controls.appendChild(excel);
     } else {
       const c = lote.corte;
-      html += "<div style='background:#F9A8D4;padding:10px 14px;border-radius:8px;margin:10px 0;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;'><div>Pedido enviado: " + fmtFechaCO(c.fecha_corte) + "</div><div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><button class='btn btn-secondary btn-sm' data-deshacer='"+c.id_corte+"'>Deshacer</button><button class='btn btn-secondary btn-sm' data-excel='corte:"+c.id_corte+"'>Descargar Excel</button></div></div>";
+      const deshacer = createEl("button", "btn btn-secondary btn-sm", "Deshacer");
+      deshacer.type = "button";
+      deshacer.setAttribute("data-deshacer", String(c.id_corte));
+
+      const excel = createEl("button", "btn btn-secondary btn-sm", "Descargar Excel");
+      excel.type = "button";
+      excel.setAttribute("data-excel", "corte:" + c.id_corte);
+
+      controls.appendChild(deshacer);
+      controls.appendChild(excel);
     }
-    if (sinValor) html += "<div style='background:#FEF3C7;padding:8px 12px;border-radius:8px;margin-bottom:8px;color:#92400E;'>Hay productos sin Precio proveedor</div>";
-    html += "<div class='admin-table-wrapper'><table class='admin-table'><thead><tr><th>Proveedor</th><th>Imagen</th><th>Referencia</th><th>Nombre</th><th>Tono / Descripción</th><th style='text-align:center;'>Cantidad total</th><th style='text-align:right;'>Precio proveedor</th><th style='text-align:right;'>Subtotal</th></tr></thead><tbody>";
-    let lastProv = "", total=0;
-    for (const r of list) {
-      if (r.proveedor !== lastProv) { lastProv = r.proveedor; html += "<tr><td colspan='8' style='background:#F9FAFB;font-weight:700;'>"+escapeHtml(lastProv||"Sin proveedor")+"</td></tr>"; }
-      const pc = r.pedidos_clientes; const sub = isNaN(pc)?0:pc*Number(r.cantidad_total||0); total += sub;
-      html += "<tr><td></td><td>"+(r.imagen_url?"<img class='cell-img' src='"+escapeHtml(r.imagen_url)+"'>":"")+"</td><td class='cell-ref'>"+escapeHtml(r.referencia)+"</td><td class='cell-name'>"+escapeHtml(r.nombre)+"</td><td>"+escapeHtml(r.tono)+"</td><td style='text-align:center;'>"+r.cantidad_total+"</td><td style='text-align:right;'>"+(isNaN(pc)?"—":formatPrecio(pc))+"</td><td style='text-align:right;'>"+(isNaN(pc)?"—":formatPrecio(sub))+"</td></tr>";
+
+    header.appendChild(controls);
+    cont.appendChild(header);
+
+    if (sinValor) {
+      cont.appendChild(
+        applyStyles(createEl("div", null, "Hay productos sin Precio proveedor"), {
+          background: "#FEF3C7",
+          padding: "8px 12px",
+          borderRadius: "8px",
+          marginBottom: "8px",
+          color: "#92400E"
+        })
+      );
     }
-    html += "</tbody></table><div style='text-align:right;margin-top:10px;font-weight:700;'>Total: "+formatPrecio(total)+"</div></div>";
-  }
-  cont.innerHTML = html;
+
+    const wrapper = createEl("div", "admin-table-wrapper");
+    const table = createEl("table", "admin-table");
+    const thead = createEl("thead");
+    const headRow = createEl("tr");
+    [
+      ["Proveedor", ""],
+      ["Imagen", ""],
+      ["Referencia", ""],
+      ["Nombre", ""],
+      ["Tono / Descripción", ""],
+      ["Cantidad total", "center"],
+      ["Precio proveedor", "right"],
+      ["Subtotal", "right"]
+    ].forEach(([label, align]) => headRow.appendChild(headerCell(label, align)));
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = createEl("tbody");
+    let lastProv = "";
+    let total = 0;
+
+    list.forEach((r) => {
+      if (r.proveedor !== lastProv) {
+        lastProv = r.proveedor;
+        const provRow = createEl("tr");
+        const provCell = createEl("td", null, lastProv || "Sin proveedor");
+        provCell.setAttribute("colspan", "8");
+        applyStyles(provCell, { background: "#F9FAFB", fontWeight: "700" });
+        provRow.appendChild(provCell);
+        tbody.appendChild(provRow);
+      }
+
+      const pc = r.pedidos_clientes;
+      const sub = isNaN(pc) ? 0 : pc * Number(r.cantidad_total || 0);
+      total += sub;
+
+      const tr = createEl("tr");
+      tr.appendChild(createEl("td"));
+
+      const tdImg = createEl("td");
+      if (r.imagen_url) {
+        const img = createEl("img", "cell-img");
+        img.src = r.imagen_url;
+        img.alt = "";
+        tdImg.appendChild(img);
+      }
+      tr.appendChild(tdImg);
+
+      tr.appendChild(createEl("td", "cell-ref", r.referencia));
+      tr.appendChild(createEl("td", "cell-name", r.nombre));
+      tr.appendChild(createEl("td", null, r.tono));
+      tr.appendChild(applyStyles(createEl("td", null, r.cantidad_total), { textAlign: "center" }));
+      tr.appendChild(applyStyles(createEl("td", null, isNaN(pc) ? "—" : formatPrecio(pc)), { textAlign: "right" }));
+      tr.appendChild(applyStyles(createEl("td", null, isNaN(pc) ? "—" : formatPrecio(sub)), { textAlign: "right" }));
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    wrapper.appendChild(
+      applyStyles(createEl("div", null, "Total: " + formatPrecio(total)), {
+        textAlign: "right",
+        marginTop: "10px",
+        fontWeight: "700"
+      })
+    );
+    cont.appendChild(wrapper);
+  });
+
   showProvBox("provTableWrap", true);
 }
 
@@ -4444,37 +5345,61 @@ async function deshacerCorte(id) {
 function renderProveedor(list, sinValor) {
   showProvBox("provLoadingBox", false);
   const body = document.getElementById("provTableBody");
+  if (!body) return;
+
+  body.textContent = "";
   if (!list.length) {
     showProvBox("provEmptyBox", true);
     return;
   }
+
   let lastProv = "";
-  let html = "";
   let total = 0;
-  for (const r of list) {
+
+  list.forEach((r) => {
     if (r.proveedor !== lastProv) {
       lastProv = r.proveedor;
-      html += "<tr><td colspan='8' style='background:#F9FAFB;font-weight:700;'>" + escapeHtml(lastProv || "Sin proveedor") + "</td></tr>";
+      const provRow = createEl("tr");
+      const provCell = createEl("td", null, lastProv || "Sin proveedor");
+      provCell.setAttribute("colspan", "8");
+      applyStyles(provCell, { background: "#F9FAFB", fontWeight: "700" });
+      provRow.appendChild(provCell);
+      body.appendChild(provRow);
     }
+
     const pc = r.pedidos_clientes;
     const sub = isNaN(pc) ? 0 : pc * Number(r.cantidad_total || 0);
     total += sub;
-    html += "<tr>" +
-      "<td></td>" +
-      "<td>" + (r.imagen_url ? "<img class='cell-img' src='" + escapeHtml(r.imagen_url) + "'>" : "") + "</td>" +
-      "<td class='cell-ref'>" + escapeHtml(r.referencia) + "</td>" +
-      "<td class='cell-name'>" + escapeHtml(r.nombre) + "</td>" +
-      "<td>" + escapeHtml(r.tono || "-") + "</td>" +
-      "<td style='text-align:center;'>" + r.cantidad_total + "</td>" +
-      "<td style='text-align:right;'>" + (isNaN(pc) ? "—" : formatPrecio(pc)) + "</td>" +
-      "<td style='text-align:right;'>" + (isNaN(pc) ? "—" : formatPrecio(sub)) + "</td>" +
-      "</tr>";
-  }
-  body.innerHTML = html;
-  document.getElementById("provTotalGeneral").textContent = formatPrecio(total);
+
+    const tr = createEl("tr");
+    tr.appendChild(createEl("td"));
+
+    const tdImg = createEl("td");
+    if (r.imagen_url) {
+      const img = createEl("img", "cell-img");
+      img.src = r.imagen_url;
+      img.alt = "";
+      tdImg.appendChild(img);
+    }
+    tr.appendChild(tdImg);
+
+    tr.appendChild(createEl("td", "cell-ref", r.referencia));
+    tr.appendChild(createEl("td", "cell-name", r.nombre));
+    tr.appendChild(createEl("td", null, r.tono || "-"));
+    tr.appendChild(applyStyles(createEl("td", null, r.cantidad_total), { textAlign: "center" }));
+    tr.appendChild(applyStyles(createEl("td", null, isNaN(pc) ? "—" : formatPrecio(pc)), { textAlign: "right" }));
+    tr.appendChild(applyStyles(createEl("td", null, isNaN(pc) ? "—" : formatPrecio(sub)), { textAlign: "right" }));
+    body.appendChild(tr);
+  });
+
+  const totalEl = document.getElementById("provTotalGeneral");
+  if (totalEl) totalEl.textContent = formatPrecio(total);
   if (sinValor) {
-    document.getElementById("provNotaSinValor").textContent = "Hay productos sin valor en Pedidos clientes";
-    document.getElementById("provNotaSinValor").style.display = "block";
+    const nota = document.getElementById("provNotaSinValor");
+    if (nota) {
+      nota.textContent = "Hay productos sin valor en Pedidos clientes";
+      nota.style.display = "block";
+    }
   }
   showProvBox("provTableWrap", true);
 }
@@ -4726,29 +5651,53 @@ function bindEvents() {
   document.getElementById("retryBtn").addEventListener("click", loadProducts);
   document.getElementById("newProductBtn").addEventListener("click", () => openProductModal(null));
   document.getElementById("productForm").addEventListener("submit", handleSubmit);
-  document.getElementById("fImagen").addEventListener("input", updateImagePreview);
 
   document.getElementById("adminSearch").addEventListener(
     "input",
     debounce(function (e) {
       state.search = e.target.value;
+      state.productPage = 1;
       document.getElementById("adminSearchClear").classList.toggle("visible", !!state.search);
-      render();
-    }, 250)
+      loadProducts();
+    }, 300)
   );
 
   document.getElementById("adminSearchClear").addEventListener("click", () => {
     const input = document.getElementById("adminSearch");
     input.value = "";
     state.search = "";
+    state.productPage = 1;
     document.getElementById("adminSearchClear").classList.remove("visible");
-    render();
+    loadProducts();
     input.focus();
   });
 
   document.getElementById("filterEstado").addEventListener("change", (e) => {
     state.filter = e.target.value;
-    render();
+    state.productPage = 1;
+    loadProducts();
+  });
+
+  const prevProductPage = document.getElementById("prevProductPageBtn");
+  const nextProductPage = document.getElementById("nextProductPageBtn");
+  if (prevProductPage) prevProductPage.addEventListener("click", () => changeProductPage(-1));
+  if (nextProductPage) nextProductPage.addEventListener("click", () => changeProductPage(1));
+
+  ["adminTableBody", "adminMobileCards"].forEach((id) => {
+    const container = document.getElementById(id);
+    if (!container) return;
+    container.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const action = button.getAttribute("data-action");
+      const productId = button.getAttribute("data-id");
+      if (action === "edit") {
+        const producto = state.products.find((p) => String(p.id_producto) === String(productId));
+        if (producto) openProductModal(producto);
+      } else if (action === "toggle") {
+        toggleActivo(productId);
+      }
+    });
   });
 
   /* --- pestañas --- */
@@ -4857,12 +5806,7 @@ function bindEvents() {
     const action = btn.getAttribute("data-action");
     const id = btn.getAttribute("data-id");
 
-    if (action === "edit") {
-      const producto = state.products.find((p) => String(p.id_producto) === String(id));
-      if (producto) openProductModal(producto);
-    } else if (action === "toggle") {
-      toggleActivo(id);
-    } else if (action === "detail") {
+    if (action === "detail") {
       openOrderDetail(id);
     } else if (action === "resena-publicar") {
       setResenaEstado(id, true);

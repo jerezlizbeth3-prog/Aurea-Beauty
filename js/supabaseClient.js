@@ -27,29 +27,3 @@ window.supabaseClient = supabaseClient;
 
 // Antes estaba en catalog.js
 let products = [];
-
-async function cargarProductosDesdeSupabase() {
-  const { data, error } = await supabaseClient
-    .from('catalogo_publico')
-    .select('*');
-
-  if (error) {
-    console.error('Error cargando catálogo desde Supabase:', error);
-    products = [];
-    return;
-  }
-
-  products = data.map(p => ({
-    id: p.id,
-    name: p.nombre,
-    category: p.categoria,
-    reference: p.referencia,
-    price: Number(p.precio),
-    description: p.descripcion,
-    image: p.imagen_url,
-    tones: Array.isArray(p.tonos) ? p.tonos.map(t => String(t)) : [],
-    offer: p.en_oferta === true,
-    offerPrice: (p.precio_oferta !== undefined && p.precio_oferta !== null) ? Number(p.precio_oferta) : null,
-    stock: (p.stock_disponible !== undefined && p.stock_disponible !== null) ? Number(p.stock_disponible) : null
-  }));
-}

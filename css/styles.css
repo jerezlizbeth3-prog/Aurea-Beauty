@@ -60,6 +60,8 @@ img {
   display: block;
 }
 
+[hidden] { display: none !important; }
+
 ul { list-style: none; }
 
 .container {
@@ -705,6 +707,65 @@ ul { list-style: none; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 20px;
+}
+
+.catalog-status {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.catalog-empty,
+.catalog-error,
+.load-error {
+  margin-top: 20px;
+  padding: 24px 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-secondary);
+  border: 1px dashed var(--color-border);
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.catalog-error,
+.load-error {
+  background: #FEF2F2;
+  border-color: #FECACA;
+  color: #B91C1C;
+}
+
+.catalog-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.catalog-load-more {
+  min-height: 48px;
+  padding: 10px 32px;
+  border: 2px solid var(--color-primary);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--color-accent);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.catalog-load-more:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.catalog-load-more:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .catalog-grid .card {
@@ -3004,3 +3065,30 @@ body.carro-open {
     display: flex;
   }
 }
+
+.descripcion,
+.producto-descripcion,
+.card-desc,
+.product-description,
+.video-card-desc,
+.video-card-body p {
+  white-space: pre-line;
+  text-align: left;
+  line-height: 1.55;
+}
+
+.descripcion strong,
+.producto-descripcion strong,
+.card-desc strong,
+.product-description strong,
+.video-card-desc strong,
+.video-card-body p strong {
+  font-weight: 700;
+  color: var(--rosa-oscuro, #9d174d);
+}
+
+.d-linea { text-align: left; line-height: 1.55; white-space: pre-wrap; }
+.d-espacio { height: .6em; }
+.d-centro { text-align: center; }
+.d-titulo { margin-top: .4em; }
+.d-linea strong { font-weight: 700; }

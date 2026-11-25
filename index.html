@@ -105,7 +105,7 @@
       <div class="category-tabs-wrapper">
         <div class="category-tabs" role="tablist" aria-label="Categorías">
           <button class="category-tab active" data-category="todos" role="tab" aria-selected="true">Todos</button>
-          <button class="category-tab" data-category="maquillaje" role="tab">Maquillaje</button>
+          <button class="category-tab" data-category="Hello Kitty" role="tab">Hello Kitty Red</button>
           <button class="category-tab" data-category="combos" role="tab"> Kits y Combos</button>
           <button class="category-tab" data-category="princesas" role="tab">Princesas</button>
           <button class="category-tab" data-category="bolsos" role="tab">Bolsos</button>
@@ -117,8 +117,8 @@
           <button class="category-tab" data-category="llaveros gloss y combos" role="tab">Llaveros, Gloss y Lips Combos</button>
           <button class="category-tab" data-category="balsamos y brillos labiales" role="tab">Hidratantes, Bálsamos, Brillos Faciales y Labiales</button>
           <button class="category-tab" data-category="fijadores prebase y primers" role="tab">Fijadores, Prebase y Primers</button>
-          <button class="category-tab" data-category="rubores iluminador contorno corrector y polvos" role="tab">Rubores, Iluminador, Contorno, Corrector y Polvos</button>
-          <button class="category-tab" data-category="brochas esponjas y beautyblender" role="tab">Brochas, Pomos y Beautyblender</button>
+          <button class="category-tab" data-category="rubores iluminador contorno" role="tab">Rubores, Iluminador, Contorno, Corrector y Polvos</button>
+          <button class="category-tab" data-category="brochas esponjas" role="tab">Brochas, Pomos y Beautyblender</button>
           <button class="category-tab" data-category="variedades" role="tab">Variedades</button>
           <button class="category-tab" data-category="manos y pies" role="tab">Manos y Pies</button>
           <button class="category-tab" data-category="capilar" role="tab">Capilar</button>
@@ -134,6 +134,12 @@
         </div>
       </div>
       <div class="catalog-grid" id="catalogGrid" role="tabpanel"></div>
+      <div class="catalog-status" id="catalogStatus" role="status" aria-live="polite" hidden></div>
+      <div class="catalog-empty" id="catalogEmpty" role="status" hidden>No hay productos en esta categoría</div>
+      <div class="catalog-error" id="catalogError" role="alert" hidden></div>
+      <div class="catalog-actions">
+        <button class="catalog-load-more" id="catalogLoadMore" type="button" hidden>Ver más</button>
+      </div>
     </div>
   </section>
 

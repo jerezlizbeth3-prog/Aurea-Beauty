@@ -142,7 +142,7 @@
               <th>Nombre</th>
               <th>Categoría</th>
               <th style="text-align:right;">Precio</th>
-              <th style="text-align:right;">Pedidos clientes</th>
+              <th style="text-align:right;">Precio oferta</th>
               <th style="text-align:center;">Stock</th>
               <th style="text-align:center;">Estado</th>
               <th style="text-align:right;">Acciones</th>
@@ -153,6 +153,12 @@
       </div>
 
       <div class="admin-mobile-cards" id="adminMobileCards"></div>
+
+      <div class="product-pagination" id="productPagination" style="display:none;">
+        <button class="btn-row-action" id="prevProductPageBtn" type="button">Anterior</button>
+        <span id="productPageInfo"></span>
+        <button class="btn-row-action" id="nextProductPageBtn" type="button">Siguiente</button>
+      </div>
     </section>
 
     <!-- ========== VISTA PEDIDOS ========== -->
@@ -319,9 +325,14 @@
       <div class="import-card">
         <div class="import-card-head">
           <h2 class="import-title">Productos e imágenes</h2>
-          <button class="btn btn-secondary btn-sm" id="downloadProductTemplateBtn" type="button">
-            Descargar plantilla (.xlsx)
-          </button>
+          <div class="import-head-actions">
+            <button class="btn btn-secondary btn-sm" id="downloadProductTemplateBtn" type="button">
+              Descargar plantilla (.xlsx)
+            </button>
+            <button class="btn btn-secondary btn-sm" id="downloadCurrentCatalogBtn" type="button">
+              Descargar Excel actual
+            </button>
+          </div>
         </div>
         <p class="import-help">
           Descarga la plantilla y completa la hoja <strong>productos</strong> con las columnas
@@ -335,7 +346,9 @@
           Arrastra las imágenes en PNG, JPG o WebP. El nombre del archivo, sin la extensión, debe
           coincidir con la <strong>referencia</strong> del producto (por ejemplo,
           <strong>REF-001.jpg</strong>). Se convierten a WebP y se guardan en el bucket
-          <strong>Img_Producto</strong>. Máximo 15 MB por imagen.
+          <strong>Img_Producto</strong>. Máximo 15 MB por imagen. También puedes arrastrar solo
+          imágenes, sin Excel: cada una actualizará la imagen del producto que tenga esa
+          referencia.
         </p>
 
         <div class="import-dropzones">
@@ -348,7 +361,7 @@
 
           <label class="import-dropzone" id="productImageDrop" for="productImageInput">
             <span class="import-drop-icon" aria-hidden="true">IMG</span>
-            <span class="import-drop-title">2. Arrastra las imágenes</span>
+            <span class="import-drop-title">Arrastra las imágenes</span>
             <span class="import-drop-sub" id="productImageFileName">Puedes seleccionar varias imágenes</span>
             <input type="file" id="productImageInput" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" multiple hidden>
           </label>
@@ -511,31 +524,33 @@
 
           <div class="form-group full-width">
             <label for="fDescripcion">Descripción</label>
-            <textarea id="fDescripcion" placeholder="Detalle, contenido del combo, modo de uso..."></textarea>
+            <textarea id="fDescripcion" rows="8" placeholder="Detalle, contenido del combo, modo de uso..."></textarea>
+            <small class="field-help">Usa *negrita*, _cursiva_ y empieza una línea con ^ para centrarla.</small>
           </div>
 
-          <div class="form-group">
-            <label for="fPrecio">Precio (COP) *</label>
-            <input type="number" id="fPrecio" required min="0" step="1" placeholder="62000">
-            <span class="error-msg">Ingresa un precio válido (0 o mayor)</span>
+          <div class="form-group full-width">
+            <label for="fTonos">Tonos</label>
+            <textarea id="fTonos" rows="5" placeholder="Rojo&#10;Nude"></textarea>
+            <small class="field-help">Un tono por línea</small>
           </div>
 
           <div class="form-group">
             <label for="fStock">Cantidad disponible *</label>
             <input type="number" id="fStock" required min="0" step="1" placeholder="0">
-            <span class="error-msg">Ingresa una cantidad válida (0 o mayor)</span>
+            <span class="error-msg">Ingresa un entero mayor o igual a 0</span>
           </div>
 
           <div class="form-group">
-            <label for="fPedidosClientes">Pedidos clientes</label>
-            <input type="number" id="fPedidosClientes" min="0" step="0.01" placeholder="0">
-            <span class="error-msg">Ingresa un valor válido</span>
+            <label for="fPrecio">Precio (COP) *</label>
+            <input type="number" id="fPrecio" required min="0.01" step="any" placeholder="62000">
+            <span class="error-msg">Ingresa un precio mayor que 0</span>
           </div>
 
           <div class="form-group full-width">
-            <label for="fImagen">Imagen (ruta o URL)</label>
-            <input type="text" id="fImagen" placeholder="img/producto.jpg">
-            <img class="img-preview" id="imgPreview" src="" alt="" style="display:none;">
+            <label for="fPrecioOferta">Precio oferta (opcional)</label>
+            <input type="number" id="fPrecioOferta" min="0.01" step="any" placeholder="Ej: 49000">
+            <small class="field-help">Déjalo vacío si no está en oferta</small>
+            <span class="error-msg">Debe ser mayor que 0 y menor que el precio</span>
           </div>
 
           <div class="form-group full-width">
