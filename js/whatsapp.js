@@ -175,6 +175,9 @@ async function submitOrder() {
     else window.open(url, '_blank');
 
     resetOrderForm();
+    if (typeof limpiarBorradorFormularioSession === 'function') {
+      limpiarBorradorFormularioSession();
+    }
     if (typeof showToast === 'function') {
       showToast('Pedido registrado correctamente. Te esperamos en WhatsApp.');
     }

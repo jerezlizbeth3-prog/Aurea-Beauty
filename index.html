@@ -95,42 +95,44 @@
   <section id="catalogo" aria-labelledby="catalogo-title">
     <div class="container">
       <h2 id="catalogo-title" class="section-title">Catálogo</h2>
-      <div class="search-bar-wrapper">
-        <div class="search-bar">
-          <span class="search-icon">🔍</span>
-          <input type="text" id="searchInput" placeholder="Buscar producto o referencia...">
-          <button class="search-clear" id="searchClear" onclick="clearSearch()">✕</button>
+      <div class="categorias-fija">
+        <div class="search-bar-wrapper">
+          <div class="search-bar">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Buscar producto o referencia...">
+            <button class="search-clear" id="searchClear" onclick="clearSearch()">✕</button>
+          </div>
         </div>
-      </div>
-      <div class="category-tabs-wrapper">
-        <div class="category-tabs" role="tablist" aria-label="Categorías">
-          <button class="category-tab active" data-category="todos" role="tab" aria-selected="true">Todos</button>
-          <button class="category-tab" data-category="Hello Kitty" role="tab">Hello Kitty Red</button>
-          <button class="category-tab" data-category="combos" role="tab"> Kits y Combos</button>
-          <button class="category-tab" data-category="princesas" role="tab">Princesas</button>
-          <button class="category-tab" data-category="bolsos" role="tab">Bolsos</button>
-          <button class="category-tab" data-category="tendencias" role="tab">Tendencias</button>
-          <button class="category-tab" data-category="corporal" role="tab">Corporal</button>
-          <button class="category-tab" data-category="cuidado facial" role="tab">Cuidado Facial y Corporal</button>
-          <button class="category-tab" data-category="paletas de sombras" role="tab">Paletas de Sombras</button>
-          <button class="category-tab" data-category="delineadores lapices y pestanina" role="tab">Delineadores, Lápices, Pestañina, Cejas y Tratamientos</button>
-          <button class="category-tab" data-category="llaveros gloss y combos" role="tab">Llaveros, Gloss y Lips Combos</button>
-          <button class="category-tab" data-category="balsamos y brillos labiales" role="tab">Hidratantes, Bálsamos, Brillos Faciales y Labiales</button>
-          <button class="category-tab" data-category="fijadores prebase y primers" role="tab">Fijadores, Prebase y Primers</button>
-          <button class="category-tab" data-category="rubores iluminador contorno" role="tab">Rubores, Iluminador, Contorno, Corrector y Polvos</button>
-          <button class="category-tab" data-category="brochas esponjas" role="tab">Brochas, Pomos y Beautyblender</button>
-          <button class="category-tab" data-category="variedades" role="tab">Variedades</button>
-          <button class="category-tab" data-category="manos y pies" role="tab">Manos y Pies</button>
-          <button class="category-tab" data-category="capilar" role="tab">Capilar</button>
-          <button class="category-tab" data-category="fragancias" role="tab">Fragancias</button>
-          <button class="category-tab" data-category="empaques" role="tab">Empaques</button>
-          <button class="category-tab" data-category="kawaii" role="tab">Kawaii</button>
-          <button class="category-tab" data-category="coquette" role="tab">Coquette</button>
-          <button class="category-tab" data-category="llaveros" role="tab">Llaveros</button>
-          <button class="category-tab" data-category="termos y ventiladores" role="tab">Termos y Ventiladores</button>
-          <button class="category-tab" data-category="gemas y piedras" role="tab">Gemas y Piedras</button>
-          <button class="category-tab" data-category="maquillaje artistico" role="tab">Maquillaje Artístico</button>
-           <button class="category-tab" data-category="trendy" role="tab">Trendy</button>
+        <div class="category-tabs-wrapper">
+          <div class="category-tabs" role="tablist" aria-label="Categorías">
+            <button class="category-tab active" data-category="todos" role="tab" aria-selected="true">Todos</button>
+            <button class="category-tab" data-category="Hello Kitty" role="tab">Hello Kitty Red</button>
+            <button class="category-tab" data-category="combos" role="tab"> Kits y Combos</button>
+            <button class="category-tab" data-category="princesas" role="tab">Princesas</button>
+            <button class="category-tab" data-category="bolsos" role="tab">Bolsos</button>
+            <button class="category-tab" data-category="tendencias" role="tab">Tendencias</button>
+            <button class="category-tab" data-category="corporal" role="tab">Corporal</button>
+            <button class="category-tab" data-category="cuidado facial" role="tab">Cuidado Facial y Corporal</button>
+            <button class="category-tab" data-category="paletas de sombras" role="tab">Paletas de Sombras</button>
+            <button class="category-tab" data-category="delineadores lapices y pestanina" role="tab">Delineadores, Lápices, Pestañina, Cejas y Tratamientos</button>
+            <button class="category-tab" data-category="llaveros gloss y combos" role="tab">Llaveros, Gloss y Lips Combos</button>
+            <button class="category-tab" data-category="balsamos y brillos labiales" role="tab">Hidratantes, Bálsamos, Brillos Faciales y Labiales</button>
+            <button class="category-tab" data-category="fijadores prebase y primers" role="tab">Fijadores, Prebase y Primers</button>
+            <button class="category-tab" data-category="rubores iluminador contorno" role="tab">Rubores, Iluminador, Contorno, Corrector y Polvos</button>
+            <button class="category-tab" data-category="brochas esponjas" role="tab">Brochas, Pomos y Beautyblender</button>
+            <button class="category-tab" data-category="variedades" role="tab">Variedades</button>
+            <button class="category-tab" data-category="manos y pies" role="tab">Manos y Pies</button>
+            <button class="category-tab" data-category="capilar" role="tab">Capilar</button>
+            <button class="category-tab" data-category="fragancias" role="tab">Fragancias</button>
+            <button class="category-tab" data-category="empaques" role="tab">Empaques</button>
+            <button class="category-tab" data-category="kawaii" role="tab">Kawaii</button>
+            <button class="category-tab" data-category="coquette" role="tab">Coquette</button>
+            <button class="category-tab" data-category="llaveros" role="tab">Llaveros</button>
+            <button class="category-tab" data-category="termos y ventiladores" role="tab">Termos y Ventiladores</button>
+            <button class="category-tab" data-category="gemas y piedras" role="tab">Gemas y Piedras</button>
+            <button class="category-tab" data-category="maquillaje artistico" role="tab">Maquillaje Artístico</button>
+            <button class="category-tab" data-category="trendy" role="tab">Trendy</button>
+          </div>
         </div>
       </div>
       <div class="catalog-grid" id="catalogGrid" role="tabpanel"></div>
@@ -257,6 +259,10 @@
                 <option value="Piedecuesta">Piedecuesta</option>
               </select>
               <span class="error-msg">Selecciona una ciudad</span>
+            </div>
+            <div class="form-group">
+              <label for="clientBarrio">Barrio</label>
+              <input type="text" id="clientBarrio" placeholder="Ej: Centro">
             </div>
             <div class="form-group full-width">
               <label for="clientNotes">Observaciones</label>

@@ -1,5 +1,6 @@
 const CATALOG_PAGE_SIZE = 24;
 const SEARCH_DEBOUNCE_MS = 300;
+const SESSION_FORM_KEY = 'auraeFormDraft';
 
 const catalogState = {
   category: 'todos',
@@ -12,9 +13,30 @@ const catalogState = {
 };
 
 let searchDebounceTimer = null;
+let yaMostroFormulario = false;
+
+function actualizarAltosBarraCatalogo() {
+  const root = document.documentElement;
+  const header = document.querySelector('.navbar') || document.querySelector('header');
+  const barra = document.querySelector('.categorias-fija');
+  const posicionHeader = header ? getComputedStyle(header).position : '';
+  const altoHeader = header && (posicionHeader === 'fixed' || posicionHeader === 'sticky')
+    ? header.getBoundingClientRect().height
+    : 0;
+
+  root.style.setProperty('--alto-header', Math.round(altoHeader) + 'px');
+  root.style.setProperty('--alto-categorias', barra ? Math.round(barra.getBoundingClientRect().height) + 'px' : '0px');
+}
+
+function initStickyCatalogBar() {
+  actualizarAltosBarraCatalogo();
+  window.addEventListener('resize', actualizarAltosBarraCatalogo, { passive: true });
+  window.addEventListener('load', actualizarAltosBarraCatalogo);
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   initNavbar();
+  initStickyCatalogBar();
   initCatalog();
   initOffers();
   initFormValidation();
@@ -22,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCart();
   initCartSummary();
   initUserData();
+  initSessionFormDraft();
   initSearch();
   initSmoothScroll();
   initReviews();
@@ -36,8 +59,9 @@ function initNavbar() {
 
   if (hamburger && navLinks) {
     hamburger.addEventListener('click', () => {
-      navLinks.classList.toggle('active');
-      if (navLinks.classList.contains('active')) {
+        navLinks.classList.toggle('active');
+        actualizarAltosBarraCatalogo();
+        if (navLinks.classList.contains('active')) {
         let mobBtn = document.getElementById('mobVerCarro');
         if (!mobBtn) {
           mobBtn = document.createElement('button');
@@ -73,6 +97,7 @@ function initNavbar() {
     navLinks.querySelectorAll('a').forEach(link => {
       link.addEventListener('click', () => {
         navLinks.classList.remove('active');
+        actualizarAltosBarraCatalogo();
       });
     });
   }
@@ -441,6 +466,19 @@ function loadMoreCatalog() {
   fetchCatalogPage(true, catalogState.requestId);
 }
 
+function ensureCatalogProductsVisible() {
+  const grid = document.getElementById('catalogGrid');
+  if (!grid) return;
+
+  const estilos = getComputedStyle(document.documentElement);
+  const altoHeader = parseFloat(estilos.getPropertyValue('--alto-header')) || 0;
+  const altoBarra = parseFloat(estilos.getPropertyValue('--alto-categorias')) || 0;
+
+  if (grid.getBoundingClientRect().top < altoHeader + altoBarra + 1) {
+    grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 function initCatalog() {
   const grid = document.getElementById('catalogGrid');
   if (!grid) return;
@@ -456,6 +494,8 @@ function initCatalog() {
       tab.setAttribute('aria-selected', 'true');
       catalogState.category = tab.dataset.category || 'todos';
       resetCatalog();
+      tab.scrollIntoView({ inline: 'center', block: 'nearest' });
+      ensureCatalogProductsVisible();
     });
   });
 
@@ -534,7 +574,7 @@ function addFromCatalog(ref) {
   updateFormValidity();
   updateCartBadges();
 
-  document.getElementById('pedido').scrollIntoView({ behavior: 'smooth' });
+  afterProductAdded();
 }
 
 function addCatalogToCart(ref) {
@@ -553,7 +593,7 @@ function addCatalogToCart(ref) {
   }
 
   addItemToCart(product, tone, qty);
-  showToast('Agregado al carro', 1800);
+  afterProductAdded();
 }
 
 function handleFormAddToCart() {
@@ -586,7 +626,7 @@ function handleFormAddToCart() {
   }
 
   addItemToCart(product, tone, qty, index);
-  showToast('Agregado al carro', 1800);
+  afterProductAdded();
 }
 
 function scrollToCatalogAndSelect(ref) {
@@ -619,16 +659,52 @@ function scrollToCatalogAndSelect(ref) {
   }, 600);
 }
 
-function initFormValidation() {
-  const fields = [
+function getClientFormFields() {
+  return [
     { id: 'clientName', validate: v => /^[A-Za-z\u00C1\u00C9\u00CD\u00D3\u00DA\u00E1\u00E9\u00ED\u00F3\u00FA\u00D1\u00F1\s]+$/.test(v) && v.trim().length >= 2 && v.trim().length <= 50 },
     { id: 'clientId', validate: v => /^\d{6,12}$/.test(v) },
     { id: 'clientPhone', validate: v => /^\d{7,10}$/.test(v) },
     { id: 'clientAddress', validate: v => !isAddressRequired() || (v.trim().length >= 5 && v.trim().length <= 200) },
     { id: 'clientCity', validate: v => v !== '' },
+    { id: 'clientNotes', validate: v => v.length <= 300 },
     { id: 'clientPaymentMethod', validate: v => v !== '' },
     { id: 'clientDeliveryMethod', validate: v => v === 'domicilio' || v === 'recoge' }
   ];
+}
+
+function formularioCompleto() {
+  return getClientFormFields().every(f => {
+    const el = document.getElementById(f.id);
+    return !!el && f.validate(el.value.trim());
+  });
+}
+
+function afterProductAdded() {
+  showCartAddedToast();
+
+  if (formularioCompleto() || yaMostroFormulario) return;
+  yaMostroFormulario = true;
+  document.getElementById('pedido')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function showCartAddedToast() {
+  let toast = document.getElementById('carroAviso');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'carroAviso';
+    toast.className = 'app-toast cart-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    document.body.appendChild(toast);
+  }
+  toast.textContent = 'Producto agregado al carro';
+  toast.classList.add('visible');
+  clearTimeout(showCartAddedToast._t);
+  showCartAddedToast._t = setTimeout(() => toast.classList.remove('visible'), 2000);
+}
+
+function initFormValidation() {
+  const fields = getClientFormFields();
 
   fields.forEach(f => {
     const el = document.getElementById(f.id);
@@ -863,6 +939,7 @@ async function aplicarFiltroCategoriasPublico() {
     catalogState.category = 'todos';
     resetCatalog();
   }
+  actualizarAltosBarraCatalogo();
 }
 
 function initUserData() {
@@ -928,6 +1005,61 @@ function fillFormWithUser(user) {
     if (el) el.value = val || '';
   });
   updateFormValidity();
+}
+
+function getCamposBorradorSession() {
+  return ['clientName', 'clientPhone', 'clientAddress', 'clientCity', 'clientBarrio', 'clientNotes'];
+}
+
+function guardarBorradorFormularioSession() {
+  const datos = {};
+  getCamposBorradorSession().forEach(id => {
+    const el = document.getElementById(id);
+    datos[id] = el ? el.value : '';
+  });
+
+  try {
+    sessionStorage.setItem(SESSION_FORM_KEY, JSON.stringify(datos));
+  } catch (err) {}
+}
+
+function initSessionFormDraft() {
+  getCamposBorradorSession().forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', guardarBorradorFormularioSession);
+    el.addEventListener('change', guardarBorradorFormularioSession);
+  });
+
+  let datos = null;
+  try {
+    const raw = sessionStorage.getItem(SESSION_FORM_KEY);
+    datos = raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    datos = null;
+  }
+
+  if (!datos || typeof datos !== 'object') return;
+
+  getCamposBorradorSession().forEach(id => {
+    const el = document.getElementById(id);
+    if (el && Object.prototype.hasOwnProperty.call(datos, id)) {
+      el.value = datos[id] == null ? '' : String(datos[id]);
+    }
+  });
+
+  lockFormFields(false);
+  const welcome = document.getElementById('userWelcome');
+  if (welcome) welcome.style.display = 'none';
+  const note = document.getElementById('userRegisterNote');
+  if (note) note.style.display = 'flex';
+  updateFormValidity();
+}
+
+function limpiarBorradorFormularioSession() {
+  try {
+    sessionStorage.removeItem(SESSION_FORM_KEY);
+  } catch (err) {}
 }
 
 function openReviewsModal() {
